@@ -8,6 +8,7 @@
 - 无第三方依赖，不需要 `npm install`。
 - 测试使用内置 `node:test`，必须带 `--test-isolation=none`（`npm test` 已包含）：
   多个测试文件共享同一进程，`time-range` 的浏览器域运行时依赖这一点。
+  在 Node 22 上该开关叫 `--experimental-test-isolation=none`，用 `npm run test:node22`。
 
 ```powershell
 npm test

@@ -252,6 +252,7 @@ npm test
 | **合计** | **54** | |
 
 CI 会在 Node 22 与 Node 24 上跑同一套测试（`.github/workflows/test.yml`）。
+Node 22 的测试进程隔离开关仍叫 `--experimental-test-isolation`，所以那边执行 `npm run test:node22`。
 
 ---
 

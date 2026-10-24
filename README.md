@@ -146,7 +146,8 @@ cost = (未缓存输入 × input + 输出 × output + 缓存写 × cacheWrite + 
 - 两档价按**每条采样自己的时间戳**选档，跨峰谷的会话两段分别计价；没有时间戳按谷值（不会虚高）。
 - 默认峰时：`Asia/Shanghai` 周一至周五 `[09:00,12:00)`、`[14:00,18:00)`（左闭右开），
   周末与 `peakHours.holidays` 中的日期按谷值。
-- `cacheWrite` 对 DeepSeek 等于 `input`（缓存写按未命中输入计），这是业务口径，不是笔误。
+- `cacheWrite` 价对 DeepSeek 等于 `input`（若上报缓存写，按未命中输入计）；但 `deepseek-v4.1-flash`
+  等模型**没有缓存写**，`cacheWriteTokens` 恒为 0，该项价格乘 0，**不会与 `input` 重复计入总价**。
 - 未定价模型仍统计 token，费用记 0，并在页面顶部与 JSON 的 `unpricedModels` 中列出。
 - 费用是**按配置单价的估算**，不含批处理折扣、阶梯价、退款，不是账单凭证。
 

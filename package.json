@@ -1,0 +1,40 @@
+{
+  "name": "dsh-cost",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "DSH 会话费用实时面板与 CLI：按模型、按 token 桶计价（CNY），零依赖、本地只读。",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/4478sc/DSH_CostLive.git"
+  },
+  "homepage": "https://github.com/4478sc/DSH_CostLive#readme",
+  "bugs": {
+    "url": "https://github.com/4478sc/DSH_CostLive/issues"
+  },
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "token-cost",
+    "dashboard",
+    "cny",
+    "pricing"
+  ],
+  "bin": {
+    "dsh-cost": "./bin/dsh-cost.mjs",
+    "dsh-cost-live": "./bin/dsh-cost-live.mjs"
+  },
+  "engines": {
+    "node": ">=22.15"
+  },
+  "scripts": {
+    "test": "node --test --test-isolation=none test/activity.test.mjs test/pricing.test.mjs test/engine.test.mjs test/zstd.test.mjs test/sessions.test.mjs test/live.test.mjs test/time-range.test.mjs",
+    "demo": "node tools/make-demo-home.mjs",
+    "live": "node bin/dsh-cost-live.mjs",
+    "live:demo": "node bin/dsh-cost-live.mjs --home demo-home",
+    "live:once": "node bin/dsh-cost-live.mjs --once",
+    "live:watch": "node bin/dsh-cost-live.mjs --watch",
+    "report": "node bin/dsh-cost.mjs report --format html --out out/dsh-cost-report.html"
+  }
+}

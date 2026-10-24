@@ -5,7 +5,7 @@
 > 在浏览器里显示人民币花费、缓存命中、运行中会话与历史明细。
 
 [![Node](https://img.shields.io/badge/node-%E2%89%A522.15-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
-[![tests](https://img.shields.io/badge/tests-54%20passing-brightgreen)](#测试)
+[![tests](https://github.com/4478sc/DSH_CostLive/actions/workflows/test.yml/badge.svg)](https://github.com/4478sc/DSH_CostLive/actions/workflows/test.yml)
 [![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![dependencies](https://img.shields.io/badge/dependencies-0-success)](#项目结构)
 

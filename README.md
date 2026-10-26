@@ -37,6 +37,7 @@ DSH 会把每个会话的完整事件流写进 `~/.dsh/sessions/` 下的 zstd �
 |---|---|
 | 20 秒实时刷新 | 浏览器轮询 `/api/fragment`，只替换报表主体，滚动位置与展开行不丢 |
 | 四档时间范围 | `All time` / `Last 30 days` / `Last 7 days` / `Today`，卡片、模型表、明细同步重算，选择持久化 |
+| 按天费用视图 | 「按会话 / 按天」切换；按采样时间切日，跨天会话拆到两天，严格回答「今天花了多少」 |
 | 运行中优先 | 运行中主会话 → 运行中子代理 → 已完成（费用降序）；运行中行高亮 + 脉冲标签 |
 | 前 5 行折叠 | 首屏只显示 5 条，其余「显示更多（还有 N 个）」，展开状态在刷新与筛选间保持 |
 | 分模型汇总 | 每个 provider/model 的四桶 token、费用、占比、会话数；未定价模型单独标注 |
@@ -102,6 +103,9 @@ node bin/dsh-cost-live.mjs --host 0.0.0.0                 # 局域网访问（�
 
 - **时间范围**：顶部四档按钮。切档时重算四张卡片与模型汇总，并对**筛选后的**明细重新分页；
   缺少 `createdAt` 的历史会话永不隐藏（宁可多显示，不能藏真实花费）。
+- **按会话 / 按天**：顶部视图切换。按会话按 `createdAt` 筛选整单费用；按天按**采样时间**切日，
+  同一会话跨天会拆成两天，卡片与模型表改为采样口径——想回答「今天实际花了多少」时用它。
+  按天视图的 Today / 7 天 / 30 天按自然日计算（含今天），边界跟随本机时区。
 - **会话明细**：默认 5 条。点击任意行展开该会话的模型明细、按轮次小计与每个计费采样。
 - **右下角浮窗**：连接状态、数据生成时间、下次刷新倒计时、总费用 / 会话数 / 总 Token；
   按钮「刷新 / 暂停」，快捷键 **R** 刷新、**P** 暂停。标签页在后台时倒计时暂停。
@@ -128,6 +132,20 @@ session 头 / session/title / request.header / assistant.message / llm.retry-sta
 - 子代理是独立会话（独立日志、独立计价），面板会打「子代理」标签并排在主会话之后。
 - 投影缓存 `~/.dsh/storages/session_projcache/sessions/<id>.json` 只用于运行状态、标题与
   `--verify` 对账；金额始终由日志重算。
+
+### 按天费用视图
+
+HTML 报告与实时页都提供「按会话 / 按天」切换（存于 `localStorage["dsh-cost-view"]`）：
+
+![按天费用视图（演示数据，Today）](assets/preview-daily.png)
+
+- **按会话**（默认）：按会话 `createdAt` 落入时间范围，每行显示整单费用；运行中优先排序。
+- **按天**：把每个计费采样按**自己的 `event.time`** 落到本地日历日，同一会话跨午夜会出现在两天，
+  每天只带当天那部分 token/费用；卡片的「总费用 / 总 Token / 缓存读取 / 缓存节省」与模型汇总
+  都改为该范围内的采样合计，所以 `Today` 是真正的「今天花了多少」。
+- 时间范围在按天视图下按自然日计算：Today = 今天，7 天 = 含今天共 7 个自然日，30 天同理；
+  边界使用本机时区。没有时间戳的采样只出现在 All time 的「未知日期」行，不会被静默丢掉。
+- 所有日桶之和严格等于会话总计：拆分不改变总额，也不会重复计费。
 
 ### 价格表
 
@@ -215,17 +233,17 @@ DSH_CostLive/
 │  ├─ sessions.mjs            # 会话发现、日志读取、投影缓存
 │  ├─ zstd.mjs                # 多 frame zstd 解压（Node 只解第一帧）
 │  ├─ activity.mjs            # 运行中/子代理判定与排序
-│  ├─ time-range.mjs          # 四档筛选 + 浏览器运行时源码（Node 与页面共用）
-│  ├─ report-data.mjs         # 会话记录、数据集、CSV、聚合
+│  ├─ time-range.mjs          # 四档筛选 + 按天视图运行时（Node 与页面共用）
+│  ├─ report-data.mjs         # 会话记录、按天聚合、数据集、CSV
 │  ├─ report-text.mjs         # 终端表格 / 明细 / 价格表
 │  ├─ report-html.mjs         # 自包含 HTML 报告（CSS/JS 内联）
 │  ├─ live.mjs                # 实时页文档 / 片段 / 原子写入
 │  ├─ live-server.mjs         # 本地 HTTP 服务与三个 API
 │  └─ live-client.js          # 浏览器端：轮询、折叠、范围、滚动恢复
-├─ test/                      # node:test，7 个文件 54 项
+├─ test/                      # node:test，8 个文件 61 项
 ├─ tools/make-demo-home.mjs   # 合成演示数据生成器
 ├─ docs/                      # 架构、DSH token 口径调研、开发笔记
-├─ assets/preview.png         # 截图（演示数据）
+├─ assets/preview*.png        # 截图（会话视图 / 按天视图，演示数据）
 ├─ LIVE.md                    # 实时面板完整使用说明
 ├─ dsh-cost-live.cmd          # Windows 启动器：HTTP 服务
 └─ dsh-cost-live-watch.cmd    # Windows 启动器：后台重建 HTML
@@ -247,10 +265,11 @@ npm test
 | `engine.test.mjs` | 8 | 流式样本替换、重试、四桶归并、零用量、模型切换 |
 | `activity.test.mjs` | 7 | `openStep` 权威性、`turnBoundary` 回退、子代理双通道识别、三桶稳定排序 |
 | `time-range.test.mjs` | 18 | 四档边界、缺失日期、聚合算术、浏览器运行时、DOM 事件、存储容错、HTML 集成 |
+| `daily.test.mjs` | 7 | 跨午夜拆分、未知时间桶、自然日边界、按天聚合去重、按天视图 DOM/存储 |
 | `live.test.mjs` | 6 | 采集/过滤、模板拆分、原子写入、HTTP API |
 | `sessions.test.mjs` | 2 | 会话发现与读取 |
 | `zstd.test.mjs` | 2 | 多 frame 解压、非压缩 JSONL 兜底 |
-| **合计** | **54** | |
+| **合计** | **61** | |
 
 CI 会在 Node 22 与 Node 24 上跑同一套测试（`.github/workflows/test.yml`）。
 Node 22 的测试进程隔离开关仍叫 `--experimental-test-isolation`，所以那边执行 `npm run test:node22`。

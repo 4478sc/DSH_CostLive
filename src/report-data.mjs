@@ -1,6 +1,7 @@
 /** Machine-readable report builders: JSON and CSV. */
 import { isSubagentSession, projectionIsRunning, sortSessionRecords } from './activity.mjs';
 import { resolvePrice } from './pricing.mjs';
+import { formatDay, localMidnight } from './time-range.mjs';
 
 /** Round a float for stable JSON output. */
 function round(value, digits = 6) {
@@ -70,6 +71,162 @@ export function modelCacheSavingMicro(model, pricing) {
   return model.tokens.cacheReadTokens * (resolved.price.input - resolved.price.cacheRead);
 }
 
+/** Empty four-bucket token record. */
+function emptyTokens() {
+  return { uncachedInputTokens: 0, outputTokens: 0, cacheWriteTokens: 0, cacheReadTokens: 0 };
+}
+
+/** Sum of the four buckets. */
+function tokensTotal(tokens) {
+  return (
+    tokens.uncachedInputTokens + tokens.outputTokens + tokens.cacheWriteTokens + tokens.cacheReadTokens
+  );
+}
+
+/**
+ * Aggregate billed samples by local calendar day.
+ *
+ * Unlike the session list (which groups by `session.createdAt`), every sample
+ * keeps its own `event.time`; a session that runs past midnight therefore
+ * contributes to both days with only that day's tokens and cost. The sum of all
+ * day buckets equals the session totals, so nothing is double counted.
+ *
+ * Samples without a usable timestamp land in a synthetic "unknown" bucket
+ * (`dayStart: 0`), which only the All-time view shows.
+ */
+export function buildDailyReport(results, pricing) {
+  const days = new Map();
+
+  const dayEntry = (dayStart) => {
+    let entry = days.get(dayStart);
+    if (entry === undefined) {
+      entry = {
+        day: dayStart > 0 ? formatDay(dayStart) : 'unknown',
+        dayStart,
+        unknown: dayStart <= 0,
+        totals: { ...emptyTokens(), totalTokens: 0, costMicroCny: 0, cacheSavingMicro: 0, samples: 0, cacheHit: null },
+        sessions: new Map(),
+      };
+      days.set(dayStart, entry);
+    }
+    return entry;
+  };
+
+  for (const result of results) {
+    const meta = result.meta ?? {};
+    const records = result.analysis?.records ?? [];
+    for (const record of records) {
+      const hasTime = typeof record.time === 'number' && Number.isFinite(record.time) && record.time > 0;
+      const day = dayEntry(hasTime ? localMidnight(record.time) : 0);
+      const buckets = record.buckets ?? emptyTokens();
+      const total = tokensTotal(buckets);
+
+      day.totals.uncachedInputTokens += buckets.uncachedInputTokens;
+      day.totals.outputTokens += buckets.outputTokens;
+      day.totals.cacheWriteTokens += buckets.cacheWriteTokens;
+      day.totals.cacheReadTokens += buckets.cacheReadTokens;
+      day.totals.totalTokens += total;
+      day.totals.costMicroCny += record.costMicroCny ?? 0;
+      day.totals.samples += 1;
+
+      let session = day.sessions.get(meta.id);
+      if (session === undefined) {
+        session = {
+          id: meta.id,
+          title: meta.title ?? null,
+          running: meta.running === true,
+          isSubagent: meta.isSubagent === true,
+          costMicroCny: 0,
+          samples: 0,
+          tokens: emptyTokens(),
+          models: new Map(),
+        };
+        day.sessions.set(meta.id, session);
+      }
+      session.costMicroCny += record.costMicroCny ?? 0;
+      session.samples += 1;
+      session.tokens.uncachedInputTokens += buckets.uncachedInputTokens;
+      session.tokens.outputTokens += buckets.outputTokens;
+      session.tokens.cacheWriteTokens += buckets.cacheWriteTokens;
+      session.tokens.cacheReadTokens += buckets.cacheReadTokens;
+
+      const modelKey = `${record.provider ?? '?'}\u0000${record.model ?? '?'}`;
+      let model = session.models.get(modelKey);
+      if (model === undefined) {
+        model = {
+          provider: record.provider ?? null,
+          model: record.model ?? null,
+          priced: record.priced === true,
+          costMicroCny: 0,
+          cacheSavingMicro: 0,
+          tokens: emptyTokens(),
+        };
+        session.models.set(modelKey, model);
+      }
+      model.costMicroCny += record.costMicroCny ?? 0;
+      model.tokens.uncachedInputTokens += buckets.uncachedInputTokens;
+      model.tokens.outputTokens += buckets.outputTokens;
+      model.tokens.cacheWriteTokens += buckets.cacheWriteTokens;
+      model.tokens.cacheReadTokens += buckets.cacheReadTokens;
+
+      const resolved = record.priced === true ? resolvePrice(record.model, pricing) : null;
+      if (resolved !== null) {
+        // Same formula as modelCacheSavingMicro(), rounded per day+model so the
+        // browser's integer sum reproduces the server number.
+        model.cacheSavingMicro += Math.round(
+          buckets.cacheReadTokens * (resolved.price.input - resolved.price.cacheRead),
+        );
+      }
+    }
+  }
+
+  const out = [];
+  for (const entry of days.values()) {
+    const sessions = [...entry.sessions.values()]
+      .map((session) => ({
+        id: session.id,
+        title: session.title,
+        running: session.running,
+        isSubagent: session.isSubagent,
+        costMicroCny: session.costMicroCny,
+        samples: session.samples,
+        tokens: { ...session.tokens, totalTokens: tokensTotal(session.tokens) },
+        models: [...session.models.values()]
+          .map((model) => ({
+            provider: model.provider,
+            model: model.model,
+            priced: model.priced,
+            costMicroCny: model.costMicroCny,
+            cacheSavingMicro: model.cacheSavingMicro,
+            tokens: { ...model.tokens, totalTokens: tokensTotal(model.tokens) },
+          }))
+          .sort((a, b) => b.costMicroCny - a.costMicroCny),
+      }))
+      .sort((a, b) => b.costMicroCny - a.costMicroCny || String(a.title ?? '').localeCompare(String(b.title ?? '')));
+
+    let cacheSavingMicro = 0;
+    for (const session of sessions) {
+      for (const model of session.models) cacheSavingMicro += model.cacheSavingMicro;
+    }
+    const billedInput =
+      entry.totals.uncachedInputTokens + entry.totals.cacheWriteTokens + entry.totals.cacheReadTokens;
+    entry.totals.cacheSavingMicro = cacheSavingMicro;
+    entry.totals.cacheHit =
+      billedInput === 0 ? null : Math.round((entry.totals.cacheReadTokens / billedInput) * 10000) / 10000;
+
+    out.push({
+      day: entry.day,
+      dayStart: entry.dayStart,
+      unknown: entry.unknown,
+      totals: entry.totals,
+      sessions,
+    });
+  }
+
+  out.sort((a, b) => b.dayStart - a.dayStart);
+  return { days: out };
+}
+
 /**
  * Compact per-session dataset embedded in the HTML report.
  *
@@ -81,8 +238,9 @@ export function modelCacheSavingMicro(model, pricing) {
  * @param {object[]} options.sessions - built session records (already sorted).
  * @param {object} options.pricing - normalized pricing document.
  * @param {number} [options.pageSize] - rows rendered before "show more".
+ * @param {object} [options.daily] - daily buckets from buildDailyReport().
  */
-export function buildTimeRangeDataset({ sessions, pricing, pageSize = 5 }) {
+export function buildTimeRangeDataset({ sessions, pricing, pageSize = 5, daily }) {
   return {
     pageSize,
     sessions: sessions.map((session) => {
@@ -116,6 +274,39 @@ export function buildTimeRangeDataset({ sessions, pricing, pageSize = 5 }) {
         models,
       };
     }),
+    days: (daily?.days ?? []).map((day) => ({
+      day: day.day,
+      dayStart: day.dayStart,
+      unknown: day.unknown === true,
+      totals: {
+        uncachedInputTokens: day.totals.uncachedInputTokens,
+        outputTokens: day.totals.outputTokens,
+        cacheWriteTokens: day.totals.cacheWriteTokens,
+        cacheReadTokens: day.totals.cacheReadTokens,
+        totalTokens: day.totals.totalTokens,
+        costMicroCny: day.totals.costMicroCny,
+        cacheSavingMicro: day.totals.cacheSavingMicro,
+        samples: day.totals.samples,
+        cacheHit: day.totals.cacheHit,
+      },
+      sessions: day.sessions.map((session) => ({
+        id: session.id,
+        title: session.title,
+        running: session.running === true,
+        isSubagent: session.isSubagent === true,
+        costMicroCny: session.costMicroCny,
+        samples: session.samples,
+        tokens: { ...session.tokens },
+        models: session.models.map((model) => ({
+          provider: model.provider ?? null,
+          model: model.model ?? null,
+          priced: model.priced === true,
+          costMicroCny: model.costMicroCny,
+          cacheSavingMicro: model.cacheSavingMicro,
+          tokens: { ...model.tokens },
+        })),
+      })),
+    })),
   };
 }
 
@@ -169,6 +360,7 @@ export function buildReport({ home, pricing, results, generatedAt }) {
       unpricedModels: [...new Set(sessions.flatMap((session) => session.unpricedModels))],
     },
     sessions,
+    daily: buildDailyReport(results, pricing),
   };
 }
 

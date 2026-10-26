@@ -119,6 +119,15 @@ const sessions = [
       { provider: 'aicodemirror1', model: 'claude-sonnet-5-5', usage: { input: 14_200, output: 2_860, cacheRead: 640_000, cacheWrite: 34_000 } },
     ],
   },
+  {
+    id: 'demo-cross-midnight',
+    title: '跨午夜会话（按天拆分）',
+    crossMidnight: true,
+    turns: [
+      { provider: 'aicodemirror1', model: 'claude-sonnet-5-5', usage: { input: 12_400, output: 4_180, cacheRead: 1_100_000, cacheWrite: 62_000 } },
+      { provider: 'opencode-go', model: 'deepseek-v4.1-flash', usage: { input: 40_600, output: 12_300, cacheRead: 2_200_000, cacheWrite: 150_000 } },
+    ],
+  },
 ];
 
 const logRoot = join(HOME, 'sessions', WORKSPACE_DIR);
@@ -128,7 +137,14 @@ mkdirSync(logRoot, { recursive: true });
 mkdirSync(cacheRoot, { recursive: true });
 
 for (const session of sessions) {
-  const createdAt = Math.round(NOW - session.createdAgo);
+  const createdAt =
+    session.crossMidnight === true
+      ? (() => {
+          const midnight = new Date(NOW);
+          midnight.setHours(0, 0, 0, 0);
+          return midnight.getTime() - 30 * 60_000;
+        })()
+      : Math.round(NOW - session.createdAgo);
   const frames = [];
   let seq = 0;
   const push = (event) => {
@@ -150,7 +166,9 @@ for (const session of sessions) {
   push({ type: 'sandbox/mode', seq: (seq += 1), time: createdAt + 3_000, data: { mode: 'workspace-write' } });
 
   session.turns.forEach((turn, index) => {
-    const time = createdAt + 60_000 + index * 420_000;
+    const time =
+      createdAt +
+      (session.crossMidnight === true ? 10 * 60_000 + index * 40 * 60_000 : 60_000 + index * 420_000);
     push({
       type: 'request/header',
       seq: (seq += 1),

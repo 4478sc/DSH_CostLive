@@ -3,7 +3,7 @@ import { activityLabel, sortSessionRecords } from './activity.mjs';
 import { describePeakHours, formatCny, formatTokens } from './pricing.mjs';
 import { formatPercent, formatTime } from './format.mjs';
 import { buildTimeRangeDataset, modelCacheSavingMicro } from './report-data.mjs';
-import { formatRangeLabel, timeRangeRuntimeSource } from './time-range.mjs';
+import { formatDay, formatRangeLabel, timeRangeRuntimeSource } from './time-range.mjs';
 
 const ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
 
@@ -69,6 +69,9 @@ export function renderHtml(report) {
   const hiddenCount = Math.max(0, sessions.length - SESSION_PAGE_SIZE);
   const runningCount = sessions.filter((session) => session.running === true).length;
   const maxCost = Math.max(0, ...sessions.map((session) => session.totals.costMicroCny));
+  const dailyDays = Array.isArray(report.daily?.days) ? report.daily.days : [];
+  const maxDayCost = Math.max(0, ...dailyDays.map((day) => day.totals.costMicroCny));
+  const todayKey = formatDay(report.generatedAt);
   const models = aggregateModels(sessions, pricing);
   const billable = summary.inputTokens + summary.cacheWriteTokens + summary.cacheReadTokens;
   const cacheSavingMicro = Math.round(models.reduce((sum, model) => sum + model.cacheSavingMicro, 0));
@@ -78,7 +81,7 @@ export function renderHtml(report) {
   // dataset locally, so one report serves all four time ranges and no-JS still
   // sees the complete server render.
   const datasetJson = JSON.stringify(
-    buildTimeRangeDataset({ sessions, pricing, pageSize: SESSION_PAGE_SIZE }),
+    buildTimeRangeDataset({ sessions, daily: report.daily, pricing, pageSize: SESSION_PAGE_SIZE }),
   ).replace(/</gu, '\\u003c');
   const rangeNote = `${formatRangeLabel('all', report.generatedAt)} · ${sessions.length} 个会话`;
 
@@ -188,6 +191,52 @@ export function renderHtml(report) {
     })
     .join('');
 
+  const dailyRows = dailyDays
+    .map((day, index) => {
+      const target = `d${index}`;
+      const label = day.unknown ? '未知日期' : day.day;
+      const isToday = day.unknown !== true && day.day === todayKey;
+      const daySessionRows = day.sessions
+        .map((session) => {
+          const chips = session.models
+            .map(
+              (model) =>
+                `<span class="chip ${model.priced ? '' : 'chip-warn'}">${escapeHtml(model.model ?? 'unknown')}</span>`,
+            )
+            .join('');
+          return `<tr>
+            <td><div class="title">${escapeHtml(session.title ?? '(untitled)')}</div><div class="mono subtle">${escapeHtml(session.id)}</div></td>
+            <td>${chips || '<span class="muted">—</span>'}</td>
+            <td class="num">${formatTokens(session.tokens.totalTokens)}</td>
+            <td class="num muted">${session.samples}</td>
+            <td class="num strong">${session.costMicroCny > 0 ? cny(session.costMicroCny) : '<span class="muted">—</span>'}</td>
+          </tr>`;
+        })
+        .join('');
+      return `<tr class="day" data-target="${target}" data-day-start="${day.dayStart}" data-unknown="${day.unknown === true}">
+          <td class="nowrap"><span class="strong">${escapeHtml(label)}</span>${isToday ? ' <span class="pill pill-today">今天</span>' : ''}</td>
+          <td class="num">${day.sessions.length}</td>
+          <td class="num">${formatTokens(day.totals.totalTokens)}</td>
+          <td class="num">${formatPercent(day.totals.cacheHit)}</td>
+          <td class="cost-cell">
+            <span class="strong">${day.totals.costMicroCny > 0 ? cny(day.totals.costMicroCny) : '<span class="muted">—</span>'}</span>
+            ${bar(day.totals.costMicroCny, maxDayCost)}
+          </td>
+        </tr>
+        <tr class="detail" id="${target}" data-day-start="${day.dayStart}" hidden>
+          <td colspan="5">
+            <div class="detail-inner">
+              <div class="detail-meta"><span>按采样时间切日 · 跨天会话只计入当天部分</span></div>
+              <table class="mini">
+                <thead><tr><th>会话</th><th>模型</th><th class="num">Token</th><th class="num">采样</th><th class="num">费用</th></tr></thead>
+                <tbody>${daySessionRows || '<tr><td colspan="5" class="muted">没有用量记录</td></tr>'}</tbody>
+              </table>
+            </div>
+          </td>
+        </tr>`;
+    })
+    .join('');
+
   const runningNote = runningCount > 0 ? ` · 当前 ${runningCount} 个运行中` : '';
   const moreLabel = `显示更多（还有 ${hiddenCount} 个）`;
   const unpricedNote =
@@ -268,6 +317,11 @@ export function renderHtml(report) {
   tr.detail > td { background: #fafbfc; padding: 0; border-top: none; }
   tr.session-extra[hidden] { display: none !important; }
   tr.session[hidden], tr.detail[hidden], tr.session[data-range-hidden] { display: none !important; }
+  tr.day { cursor: pointer; }
+  tr.day:hover { background: #fafbfc; }
+  tr.day[hidden], tr.day[data-range-hidden] { display: none !important; }
+  .pill-today { background: #e0f2fe; border: 1px solid #bae6fd; color: #0369a1; }
+  #daily[hidden], #sessions[hidden] { display: none !important; }
   .sessions-more { display: flex; justify-content: center; padding: 12px 20px 16px; border-top: 1px solid var(--line); }
   .sessions-more[hidden] { display: none !important; }
   .empty-row td { padding: 20px; }
@@ -294,6 +348,19 @@ export function renderHtml(report) {
   .range-flag[hidden] { display: none !important; }
   .range-note { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
   .range-bar[data-filtered="true"] .range-note { color: #0369a1; }
+  .view-selector {
+    display: inline-flex; gap: 2px; padding: 3px;
+    background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px;
+  }
+  .view-btn {
+    appearance: none; border: none; background: transparent; color: #475569;
+    font: inherit; font-size: 12px; font-weight: 550; line-height: 1.3;
+    padding: 6px 11px; border-radius: 9px; cursor: pointer; white-space: nowrap;
+    transition: background .15s ease, color .15s ease;
+  }
+  .view-btn:hover { background: #e2e8f0; color: #0f172a; }
+  .view-btn.active { background: #e2e8f0; color: #0f172a; box-shadow: inset 0 0 0 1px #cbd5e1; }
+  .view-btn:focus-visible { outline: 2px solid #0ea5e9; outline-offset: 2px; }
   .more-btn {
     appearance: none; border: 1px solid var(--line); background: #f8fafc; color: var(--accent);
     border-radius: 999px; padding: 7px 18px; font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer;
@@ -326,6 +393,7 @@ export function renderHtml(report) {
   .range-bar { display: none !important; }
   tr.session.session-extra[hidden] { display: table-row !important; }
   .sessions-more { display: none !important; }
+  #daily[hidden] { display: block !important; }
 </style></noscript>
 </head>
 <body>
@@ -345,6 +413,10 @@ export function renderHtml(report) {
       <button type="button" class="range-btn" data-range="30d" aria-pressed="false">Last 30 days</button>
       <button type="button" class="range-btn" data-range="7d" aria-pressed="false">Last 7 days</button>
       <button type="button" class="range-btn" data-range="today" aria-pressed="false">Today</button>
+    </div>
+    <div class="view-selector" role="group" aria-label="统计视图">
+      <button type="button" class="view-btn active" data-view="session" aria-pressed="true">按会话</button>
+      <button type="button" class="view-btn" data-view="daily" aria-pressed="false">按天</button>
     </div>
     <span class="range-flag" data-range-flag hidden>已筛选</span>
     <span class="range-note" data-range-note aria-live="polite">${escapeHtml(rangeNote)}</span>
@@ -388,7 +460,7 @@ export function renderHtml(report) {
   </section>
 
   <section id="sessions">
-    <h2>会话明细（运行中优先${runningNote} · 点击行展开模型明细）</h2>
+    <h2>会话明细（按创建时间 · 运行中优先${runningNote} · 点击行展开模型明细）</h2>
     <div class="table-wrap">
       <table>
         <thead>
@@ -402,6 +474,19 @@ export function renderHtml(report) {
         ? `<div class="sessions-more" data-sessions-more><button type="button" class="more-btn" data-sessions-toggle data-more-label="${escapeHtml(moreLabel)}" aria-expanded="false">${escapeHtml(moreLabel)}</button></div>`
         : ''
     }
+  </section>
+
+  <section id="daily" hidden>
+    <h2>按天费用（按采样时间切日 · 跨天会话会拆分 · 点击行展开当天会话）</h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>日期</th><th class="num">会话</th><th class="num">Token</th><th class="num">缓存命中</th><th class="cost-cell">费用</th></tr>
+        </thead>
+        <tbody>${dailyRows}<tr id="daily-empty" class="empty-row"${dailyDays.length === 0 ? '' : ' hidden'}><td colspan="5" class="muted">无符合条件的花费</td></tr></tbody>
+      </table>
+    </div>
+    <div class="note">按采样时间切日，同一会话跨天会拆分到两天；按天视图下 Today / 7 天 / 30 天按自然日计算（含今天），边界使用本机时区。</div>
   </section>
 
   <section>
@@ -433,17 +518,42 @@ ${timeRangeRuntimeSource()}
     } catch (error) {
       storage = null;
     }
-    var range = runtime.readSavedRange(storage);
+    var range = runtime.normalizeTimeRange(urlParam('range') || runtime.readSavedRange(storage));
+    var view = runtime.normalizeView(urlParam('view') || runtime.readSavedView(storage));
     var expanded = false;
+    function urlParam(name) {
+      try {
+        return new URLSearchParams(window.location.search).get(name);
+      } catch (error) {
+        return null;
+      }
+    }
+    function syncUrl() {
+      try {
+        var next = new URL(window.location.href);
+        next.searchParams.set('range', range);
+        next.searchParams.set('view', view);
+        window.history.replaceState(null, '', next.toString());
+      } catch (error) {
+        /* file:// or restricted history: URL state is optional */
+      }
+    }
     function applyView() {
-      runtime.applyTimeRange(document, { range: range, showAll: expanded });
+      runtime.applyTimeRange(document, { range: range, showAll: expanded, view: view });
     }
     runtime.bindRangeSelector(document, function (next) {
       range = next;
       runtime.saveRange(storage, next);
       applyView();
+      syncUrl();
     });
-    document.querySelectorAll('tr.session').forEach(function (row) {
+    runtime.bindViewSelector(document, function (next) {
+      view = next;
+      runtime.saveView(storage, next);
+      applyView();
+      syncUrl();
+    });
+    document.querySelectorAll('tr.session, tr.day').forEach(function (row) {
       row.addEventListener('click', function () {
         var detail = document.getElementById(row.dataset.target);
         if (!detail) return;

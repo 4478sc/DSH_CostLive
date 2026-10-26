@@ -23,6 +23,7 @@ live.mjs :: collectLiveReport(options)
    │      └─ pricing.mjs  costMicroCny()      每条采样按自身时间戳选峰/谷价
    │
    └─ report-data.mjs  buildReport()          会话记录、summary、模型汇总、数据集
+          └─ buildDailyReport()               采样按本地日历日聚合（跨天会话拆分）
           │
           ▼
    report-html.mjs  renderHtml(report)        自包含 HTML（内联 CSS + 时间范围运行时 + 数据集）
@@ -45,8 +46,8 @@ live.mjs :: collectLiveReport(options)
 | `engine.mjs` | 事件 → 计费采样（替换/重试规则）与四桶聚合 | 不决定展示格式 |
 | `pricing.mjs` | 价表归一、模型匹配、峰谷判定、整数 micro-CNY | 不读会话日志 |
 | `activity.mjs` | 运行中/子代理判定与排序比较器 | 不改变费用 |
-| `time-range.mjs` | 四档筛选、聚合重算、浏览器运行时源码 | 不发请求、不碰 DSH |
-| `report-data.mjs` | 会话记录、summary、数据集、CSV | 不拼 HTML |
+| `time-range.mjs` | 四档筛选、按天视图的自然日边界/聚合、浏览器运行时源码 | 不发请求、不碰 DSH |
+| `report-data.mjs` | 会话记录、按天桶、summary、数据集、CSV | 不拼 HTML |
 | `report-text.mjs` | 终端表格 / 单会话明细 | — |
 | `report-html.mjs` | 自包含报告、折叠、范围选择器、内嵌数据集 | 不重新实现筛选规则（调用 time-range） |
 | `live.mjs` | 实时页文档/片段、原子写入 | 不重复实现采集 |
@@ -68,6 +69,10 @@ live.mjs :: collectLiveReport(options)
 7. **金额以 micro-CNY 整数累计。** 先 `Math.round` 到 1e-6 元再求和，展示时才除 1e6；避免浮点漂移。
 8. **实时页不复制样式。** 页面直接取 `renderHtml()` 的 `<style>` 与 `.wrap`，所以报告与面板永远同款。
 9. **写文件必须原子。** 先写 `<target>.<pid>.<ts>.tmp` 再 rename；Windows 上 rename 可能失败，回退直接写。
+10. **按天桶之和等于会话总计。** `buildDailyReport()` 只搬动采样、不改金额；跨天会话拆分后，
+    所有日桶的 token/费用之和必须与 `report.summary` 严格相等。无时间戳的采样进 `dayStart: 0`
+    的未知桶，只在 All time 显示。按天视图的范围判定用自然日（`rangeDayCutoff`），不要复用
+    `rangeCutoff` 的滚动 24h 边界。
 
 ## 4. 服务端行为
 

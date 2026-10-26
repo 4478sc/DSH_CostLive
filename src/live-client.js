@@ -41,6 +41,7 @@
     lastHtml: null,
     showAll: false,
     range: 'all',
+    view: 'session',
     lastView: null,
   };
 
@@ -108,6 +109,9 @@
     for (var index = 0; index < rows.length; index += 1) {
       if (!rows[index].hasAttribute('data-range-hidden')) sessions += 1;
     }
+    if (state.view === 'daily' && state.lastView && state.lastView.stats) {
+      sessions = state.lastView.stats.sessions;
+    }
     var unpriced = document.querySelector('.note.warn');
     var rangeNote = document.querySelector('[data-range-note]');
     return {
@@ -156,9 +160,39 @@
     }
   }
 
+  function urlParam(name) {
+    try {
+      return new URLSearchParams(window.location.search).get(name);
+    } catch (error) {
+      return null;
+    }
+  }
+
+  function syncUrl() {
+    try {
+      var next = new URL(window.location.href);
+      next.searchParams.set('range', state.range);
+      next.searchParams.set('view', state.view);
+      window.history.replaceState(null, '', next.toString());
+    } catch (error) {
+      /* file:// / restricted history: URL state is optional */
+    }
+  }
+
   function readRange() {
     var runtime = window.DSH_TIME_RANGE;
-    return runtime ? runtime.readSavedRange(localStorageRef()) : 'all';
+    if (!runtime) return 'all';
+    var fromUrl = urlParam('range');
+    if (fromUrl) return runtime.normalizeTimeRange(fromUrl);
+    return runtime.readSavedRange(localStorageRef());
+  }
+
+  function readView() {
+    var runtime = window.DSH_TIME_RANGE;
+    if (!runtime) return 'session';
+    var fromUrl = urlParam('view');
+    if (fromUrl) return runtime.normalizeView(fromUrl);
+    return runtime.readSavedView(localStorageRef());
   }
 
   /**
@@ -172,7 +206,7 @@
   function applyView() {
     var runtime = window.DSH_TIME_RANGE;
     if (!runtime) return null;
-    var result = runtime.applyTimeRange(document, { range: state.range, showAll: state.showAll });
+    var result = runtime.applyTimeRange(document, { range: state.range, showAll: state.showAll, view: state.view });
     if (result) state.lastView = result;
     return result;
   }
@@ -190,6 +224,18 @@
     state.range = runtime.normalizeTimeRange(range);
     runtime.saveRange(localStorageRef(), state.range);
     applyView();
+    syncUrl();
+    writeStore('open', openSessionIds());
+    render();
+  }
+
+  function setView(view) {
+    var runtime = window.DSH_TIME_RANGE;
+    if (!runtime) return;
+    state.view = runtime.normalizeView(view);
+    runtime.saveView(localStorageRef(), state.view);
+    applyView();
+    syncUrl();
     writeStore('open', openSessionIds());
     render();
   }
@@ -514,6 +560,7 @@
     var open = readStore('open', []);
     state.showAll = readStore('showAll', false) === true;
     state.range = readRange();
+    state.view = readView();
     restoreOpen(open);
     applyView();
     restoreScroll();
@@ -529,6 +576,7 @@
     var open = readStore('open', []);
     state.showAll = readStore('showAll', false) === true;
     state.range = readRange();
+    state.view = readView();
     restoreOpen(open);
     applyView();
     restoreScroll();
@@ -563,13 +611,19 @@
         setRange(rangeButton.getAttribute('data-range'));
         return;
       }
+      var viewButton = event.target.closest ? event.target.closest('.view-btn') : null;
+      if (viewButton) {
+        event.preventDefault();
+        setView(viewButton.getAttribute('data-view'));
+        return;
+      }
       var toggle = event.target.closest ? event.target.closest('[data-sessions-toggle]') : null;
       if (toggle) {
         event.preventDefault();
         setShowAll(!state.showAll);
         return;
       }
-      var row = event.target.closest ? event.target.closest('tr.session') : null;
+      var row = event.target.closest ? event.target.closest('tr.session, tr.day') : null;
       if (!row) return;
       if (event.target.closest('a, button')) return;
       var detail = document.getElementById(row.getAttribute('data-target'));

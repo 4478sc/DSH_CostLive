@@ -8,7 +8,8 @@ import { loadPricing, formatCny } from './pricing.mjs';
 import { buildReport, toCsv } from './report-data.mjs';
 import { renderHtml } from './report-html.mjs';
 import { renderDetail, renderList, renderModels, verifyProjection } from './report-text.mjs';
-import { discoverSessions, matchSession, readSession, resolveHome } from './sessions.mjs';
+import { discoverSessions, matchSession, readSession } from './sessions.mjs';
+import { loadSources } from './sources.mjs';
 
 const COMMANDS = new Set(['list', 'session', 'models', 'report', 'help']);
 const VALUE_FLAGS = new Set(['home', 'workspace', 'model', 'since', 'until', 'format', 'out', 'top', 'pricing']);
@@ -23,6 +24,8 @@ const HELP = `dsh-cost — DeepSeek Harness 会话费用（CNY）
 
 选项
   --home <dir>         DSH 数据目录（默认 $DSH_HOME 或 ~/.dsh）
+  --source <label=dir> 追加一个数据源；可重复（例如 主机 / VM）
+  --sources <file>     从 JSON 读取多个数据源（label + home）
   --pricing <file>     自定义价格表 JSON（默认 config/pricing.json）
   --workspace <text>   按工作区目录名过滤
   --model <text>       仅显示使用该模型（子串匹配）的会话
@@ -81,6 +84,16 @@ function parseArgs(argv) {
       options.help = true;
       continue;
     }
+    if (name === 'source' || name === 'sources') {
+      if (value === undefined) {
+        value = argv[index + 1];
+        index += 1;
+      }
+      if (value === undefined) throw new Error(`option --${name} requires a value`);
+      if (name === 'source') (options.source ??= []).push(value);
+      else options.sources = value;
+      continue;
+    }
     if (VALUE_FLAGS.has(name)) {
       if (value === undefined) {
         value = argv[index + 1];
@@ -114,6 +127,8 @@ function analyzeAll(descriptors, pricing, options) {
   for (const descriptor of descriptors) {
     try {
       const { meta, events, badLines, projection } = readSession(descriptor);
+      meta.source = descriptor.source ?? null;
+      meta.sourceHome = descriptor.sourceHome ?? null;
       if (badLines > 0 && options.verbose) process.stderr.write(`warning: ${meta.id}: skipped ${badLines} malformed log line(s)\n`);
       const analysis = analyzeEvents(events, pricing);
       results.push({ meta, analysis, projection });
@@ -189,10 +204,16 @@ export function main(argv = process.argv.slice(2)) {
     return 0;
   }
 
-  const home = resolveHome(options.home);
-  if (!existsSync(home)) {
-    process.stderr.write(`dsh-cost: DSH home not found: ${home}\n`);
-    return 1;
+  let sources;
+  try {
+    sources = loadSources({
+      sources: options.source,
+      sourcesPath: options.sources,
+      home: options.home,
+    });
+  } catch (error) {
+    process.stderr.write(`dsh-cost: ${error.message}\n`);
+    return 2;
   }
 
   let since;
@@ -211,11 +232,38 @@ export function main(argv = process.argv.slice(2)) {
     return 2;
   }
 
-  const descriptors = discoverSessions({ home, workspace: options.workspace, since, until, id: sessionQuery });
+  const descriptors = [];
+  const sourceStats = [];
+  for (const source of sources) {
+    if (!existsSync(source.home)) {
+      const message = `DSH 数据目录不存在: ${source.home}`;
+      process.stderr.write(`dsh-cost: ${source.label}: ${message}\n`);
+      sourceStats.push({ label: source.label, home: source.home, sessions: 0, error: message });
+      continue;
+    }
+    const found = discoverSessions({
+      home: source.home,
+      workspace: options.workspace,
+      since,
+      until,
+      id: sessionQuery,
+    });
+    sourceStats.push({ label: source.label, home: source.home, sessions: 0, error: null });
+    for (const descriptor of found) {
+      descriptor.source = source.label;
+      descriptor.sourceHome = source.home;
+      descriptors.push(descriptor);
+    }
+  }
   if (descriptors.length === 0) {
-    process.stderr.write(`dsh-cost: no sessions found under ${home}${sessionQuery ? ` matching "${sessionQuery}"` : ''}\n`);
+    process.stderr.write(
+      `dsh-cost: no sessions found under ${sources.map((source) => `${source.label}=${source.home}`).join(', ')}${
+        sessionQuery ? ` matching "${sessionQuery}"` : ''
+      }\n`,
+    );
     return 1;
   }
+  const home = sourceStats.find((source) => source.error === null)?.home ?? sources[0].home;
 
   let selected = descriptors;
   if (sessionQuery !== undefined) {
@@ -238,10 +286,13 @@ export function main(argv = process.argv.slice(2)) {
     process.stderr.write('dsh-cost: no sessions match the current filters\n');
     return 1;
   }
+  for (const source of sourceStats) {
+    source.sessions = results.filter((result) => result.meta.source === source.label).length;
+  }
 
   const generatedAt = Date.now();
   if (format === 'json') {
-    const report = buildReport({ home, pricing, results, generatedAt });
+    const report = buildReport({ home, sources: sourceStats, pricing, results, generatedAt });
     const text = `${JSON.stringify(report, null, 2)}\n`;
     if (options.out !== undefined) {
       const target = writeOut(options.out, text);
@@ -252,7 +303,7 @@ export function main(argv = process.argv.slice(2)) {
     return 0;
   }
   if (format === 'csv') {
-    const report = buildReport({ home, pricing, results, generatedAt });
+    const report = buildReport({ home, sources: sourceStats, pricing, results, generatedAt });
     if (options.out !== undefined) {
       // A UTF-8 BOM keeps Excel on Windows from reading Chinese titles as ANSI.
       const target = writeOut(options.out, `\uFEFF${toCsv(report)}`);
@@ -263,7 +314,7 @@ export function main(argv = process.argv.slice(2)) {
     return 0;
   }
   if (format === 'html') {
-    const report = buildReport({ home, pricing, results, generatedAt });
+    const report = buildReport({ home, sources: sourceStats, pricing, results, generatedAt });
     const target = writeOut(options.out ?? 'dsh-cost-report.html', renderHtml(report));
     process.stdout.write(`HTML 报告已生成: ${target}\n`);
     process.stdout.write(`会话 ${report.summary.sessions} 个 · 总费用 ${formatCny(report.summary.costCny)} · Token ${report.summary.totalTokens.toLocaleString('en-US')}\n`);
@@ -275,7 +326,7 @@ export function main(argv = process.argv.slice(2)) {
     process.stdout.write(`${renderDetail(result, { pricing, steps: options.steps === true })}\n`);
     return 0;
   }
-  process.stdout.write(`${renderList(results, { pricing, home, generatedAt })}\n`);
+  process.stdout.write(`${renderList(results, { pricing, home, sources: sourceStats, generatedAt })}\n`);
   if (options.verify === true) {
     const checked = results.map((result) => ({ result, verification: verifyProjection(result) })).filter((entry) => entry.verification !== null);
     const mismatched = checked.filter((entry) => !entry.verification.ok);

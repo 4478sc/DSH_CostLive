@@ -36,6 +36,7 @@ DSH 会把每个会话的完整事件流写进 `~/.dsh/sessions/` 下的 zstd �
 | 能力 | 说明 |
 |---|---|
 | 20 秒实时刷新 | 浏览器轮询 `/api/fragment`，只替换报表主体，滚动位置与展开行不丢 |
+| 多数据源 | 同时扫描主机 `~/.dsh` 与 VMware 里的 DSH（镜像目录），合并统计并标注「主机 / VM」 |
 | 四档时间范围 | `All time` / `Last 30 days` / `Last 7 days` / `Today`，卡片、模型表、明细同步重算，选择持久化 |
 | 按天费用视图 | 「按会话 / 按天」切换；按采样时间切日，跨天会话拆到两天，严格回答「今天花了多少」 |
 | 运行中优先 | 运行中主会话 → 运行中子代理 → 已完成（费用降序）；运行中行高亮 + 脉冲标签 |
@@ -57,7 +58,7 @@ DSH 会把每个会话的完整事件流写进 `~/.dsh/sessions/` 下的 zstd �
 git clone https://github.com/4478sc/DSH_CostLive.git
 cd DSH_CostLive
 
-# 1) 想先看效果：生成 10 个虚构会话（写进 demo-home/，可随时删除）
+# 1) 想先看效果：生成 11 个虚构会话（写进 demo-home/，可随时删除）
 node tools/make-demo-home.mjs
 node bin/dsh-cost-live.mjs --home demo-home
 
@@ -71,7 +72,8 @@ Windows 上也可以直接双击：
 
 | 文件 | 作用 |
 |---|---|
-| `dsh-cost-live.cmd` | 本地 HTTP 服务（推荐，页面原地刷新） |
+| `dsh-cost-live.cmd` | 本地 HTTP 服务（推荐，页面原地刷新）；读取 `config\sources.json`，默认合并主机 + VM |
+| `dsh-cost-vm-sync.cmd` | 每 20 秒把 VM 的 `~/.dsh` 增量同步到 `.dsh-vm/`，保持窗口打开 |
 | `dsh-cost-live-watch.cmd` | 后台每 20 秒重建独立 HTML，供 `file:///` 打开 |
 
 > macOS / Linux：命令相同，`.cmd` 换成 `node bin/dsh-cost-live.mjs` 即可。
@@ -96,6 +98,45 @@ node bin/dsh-cost-live.mjs --host 0.0.0.0                 # 局域网访问（�
 ```
 
 端口被占用会自动 +1；`--interval` 最小 5 秒。完整选项见 [`LIVE.md`](LIVE.md#命令行选项)。
+
+---
+
+## 同时监测主机与 VMware 里的 DSH
+
+主机和 Ubuntu VM 各跑一个 DSH 时，面板可以同时读两边，不需要把日志传到外部服务：
+
+1. **启动同步**（保持窗口打开；每 20 秒增量拉取 VM 的 `~/.dsh`）：
+
+   ```powershell
+   dsh-cost-vm-sync.cmd
+   # 单次：powershell -ExecutionPolicy Bypass -File tools\sync-vm-dsh.ps1
+   ```
+
+2. **启动面板**：
+
+   ```powershell
+   dsh-cost-live.cmd
+   # 或：node bin\dsh-cost-live.mjs --sources config\sources.json
+   ```
+
+`config/sources.json` 定义数据源，`home` 支持 `~` 与相对路径（相对该 JSON 文件）：
+
+![主机 + VM 合并](assets/preview-multi.png)
+
+```json
+{
+  "sources": [
+    { "label": "主机", "home": "~/.dsh" },
+    { "label": "VM", "home": "../../.dsh-vm" }
+  ]
+}
+```
+
+- 同步只复制 VM 的 `sessions/` 与 `storages/session_projcache/`，增量传输；镜像默认写到 `.dsh-vm/`，已在 `.gitignore` 中。
+- VM 关机时同步脚本跳过并每 60 秒重试；面板仍显示主机数据，并在顶部提示「数据源不可用」。
+- 会话行会带「主机 / VM」标签；卡片、模型汇总、会话数、按天视图都是两边合并后的结果。
+- CLI 同样支持：`node bin\dsh-cost.mjs --sources config\sources.json`，或用 `--source 主机=~/.dsh --source VM=F:\...\.dsh-vm` 临时指定。
+- VM 地址/用户/私钥可在 `tools/sync-vm-dsh.ps1` 顶部参数中修改（默认 `192.168.140.133` / `asic` / `%USERPROFILE%\.ssh\vm_ed25519`）。
 
 ---
 
@@ -128,7 +169,7 @@ session 头 / session/title / request.header / assistant.message / llm.retry-sta
 四桶用量 + 逐样本 provider/model/time → 按模型价表计价（micro-CNY 取整）
 ```
 
-- DSH 数据目录优先级：`--home` → `$DSH_HOME` → `~/.dsh`。
+- DSH 数据目录优先级：`--sources` / `--source` → `--home` → `$DSH_HOME` → `~/.dsh`；多数据源时每个会话带来源标签。
 - 子代理是独立会话（独立日志、独立计价），面板会打「子代理」标签并排在主会话之后。
 - 投影缓存 `~/.dsh/storages/session_projcache/sessions/<id>.json` 只用于运行状态、标题与
   `--verify` 对账；金额始终由日志重算。
@@ -208,7 +249,8 @@ node bin/dsh-cost.mjs --verify                     # 与 DSH tokenUsage 投影�
 
 | 选项 | 说明 |
 |---|---|
-| `--home <dir>` / `--pricing <file>` | 数据目录 / 自定义价表 |
+| `--home <dir>` / `--pricing <file>` | 单一数据目录 / 自定义价表 |
+| `--source <label=dir>` / `--sources <file>` | 追加数据源（可重复）/ 从 JSON 读取多个数据源 |
 | `--workspace <text>` / `--model <text>` | 按工作区目录名 / 模型子串过滤 |
 | `--since` / `--until` | 会话创建时间范围（`YYYY-MM-DD` 或 ISO） |
 | `--top <n>` / `--priced-only` / `--all` | 费用 Top N / 仅计费会话 / 含无用量会话 |
@@ -227,10 +269,12 @@ DSH_CostLive/
 │  ├─ dsh-cost.mjs            # CLI 入口
 │  └─ dsh-cost-live.mjs       # 实时面板入口（server / --watch / --once）
 ├─ config/pricing.json        # 价表（谷/峰/别名）
+├─ config/sources.json        # 数据源：主机 ~/.dsh + VM 镜像 .dsh-vm
 ├─ src/
 │  ├─ pricing.mjs             # 价表归一、模型匹配、峰谷判定、micro-CNY 计价
 │  ├─ engine.mjs              # 事件流 fold → 计费采样与四桶聚合
 │  ├─ sessions.mjs            # 会话发现、日志读取、投影缓存
+│  ├─ sources.mjs             # 主机/VM 多数据源解析与标签
 │  ├─ zstd.mjs                # 多 frame zstd 解压（Node 只解第一帧）
 │  ├─ activity.mjs            # 运行中/子代理判定与排序
 │  ├─ time-range.mjs          # 四档筛选 + 按天视图运行时（Node 与页面共用）
@@ -240,12 +284,15 @@ DSH_CostLive/
 │  ├─ live.mjs                # 实时页文档 / 片段 / 原子写入
 │  ├─ live-server.mjs         # 本地 HTTP 服务与三个 API
 │  └─ live-client.js          # 浏览器端：轮询、折叠、范围、滚动恢复
-├─ test/                      # node:test，8 个文件 61 项
+├─ test/                      # node:test，9 个文件 64 项
 ├─ tools/make-demo-home.mjs   # 合成演示数据生成器
+├─ tools/sync-vm-dsh.ps1      # 从 VMware VM 增量同步 ~/.dsh 到 .dsh-vm
+├─ tools/vm-sync-snapshot.sh  # VM 端增量打包脚本
 ├─ docs/                      # 架构、DSH token 口径调研、开发笔记
 ├─ assets/preview*.png        # 截图（会话视图 / 按天视图，演示数据）
 ├─ LIVE.md                    # 实时面板完整使用说明
-├─ dsh-cost-live.cmd          # Windows 启动器：HTTP 服务
+├─ dsh-cost-live.cmd          # Windows 启动器：HTTP 服务（主机 + VM）
+├─ dsh-cost-vm-sync.cmd       # Windows 启动器：持续同步 VM 数据
 └─ dsh-cost-live-watch.cmd    # Windows 启动器：后台重建 HTML
 ```
 
@@ -267,9 +314,10 @@ npm test
 | `time-range.test.mjs` | 18 | 四档边界、缺失日期、聚合算术、浏览器运行时、DOM 事件、存储容错、HTML 集成 |
 | `daily.test.mjs` | 7 | 跨午夜拆分、未知时间桶、自然日边界、按天聚合去重、按天视图 DOM/存储 |
 | `live.test.mjs` | 6 | 采集/过滤、模板拆分、原子写入、HTTP API |
+| `sources.test.mjs` | 3 | 多数据源解析、主机+VM 合并、缺失数据源降级 |
 | `sessions.test.mjs` | 2 | 会话发现与读取 |
 | `zstd.test.mjs` | 2 | 多 frame 解压、非压缩 JSONL 兜底 |
-| **合计** | **61** | |
+| **合计** | **64** | |
 
 CI 会在 Node 22 与 Node 24 上跑同一套测试（`.github/workflows/test.yml`）。
 Node 22 的测试进程隔离开关仍叫 `--experimental-test-isolation`，所以那边执行 `npm run test:node22`。
@@ -294,6 +342,7 @@ Node 22 的测试进程隔离开关仍叫 `--experimental-test-isolation`，所�
 - 只读本地文件；服务默认绑定 `127.0.0.1`，只提供页面与 JSON，不执行请求里的命令。
 - 页面会显示会话标题与工作区路径。使用 `--host 0.0.0.0` 时页面**没有鉴权**，仅限可信网络。
 - `demo-home/` 与 `out/` 都是生成物，已在 `.gitignore` 中；不要把真实会话日志或报告提交到仓库。
+- VM 镜像只复制 `sessions/` 与 `storages/session_projcache/`，不含 `.credentials.yaml` 等凭据文件；`.dsh-vm/` 同样在 `.gitignore` 中。
 
 ---
 

@@ -12,7 +12,8 @@ live-server.mjs ── 串行化 / 1 s 内合并重复请求
    │
    ▼
 live.mjs :: collectLiveReport(options)
-   │  resolveHome：--home → $DSH_HOME → ~/.dsh
+   │  sources.mjs  loadSources()：--sources JSON → --source 列表 → --home/$DSH_HOME
+   │  每个 source 得到 { label, home }；缺失的 source 只降级，不拖垮其他 source
    │
    ├─ sessions.mjs  discoverSessions()      枚举 <home>/sessions/*/*/session.v4.jsonl.zstd
    │      └─ zstd.mjs  decompressZstdFrames()  逐 frame 解压（Node 只解第一帧）
@@ -42,6 +43,7 @@ live.mjs :: collectLiveReport(options)
 | 模块 | 职责 | 不该做的事 |
 |---|---|---|
 | `sessions.mjs` | 发现会话、读 header/title、读投影缓存 | 不做计价 |
+| `sources.mjs` | 解析多数据源（JSON / `--source` / `--home`），生成 label | 不读会话日志 |
 | `zstd.mjs` | 解析 zstd frame 边界并逐帧解压 | 不解析 JSON 语义 |
 | `engine.mjs` | 事件 → 计费采样（替换/重试规则）与四桶聚合 | 不决定展示格式 |
 | `pricing.mjs` | 价表归一、模型匹配、峰谷判定、整数 micro-CNY | 不读会话日志 |
@@ -73,6 +75,8 @@ live.mjs :: collectLiveReport(options)
     所有日桶的 token/费用之和必须与 `report.summary` 严格相等。无时间戳的采样进 `dayStart: 0`
     的未知桶，只在 All time 显示。按天视图的范围判定用自然日（`rangeDayCutoff`），不要复用
     `rangeCutoff` 的滚动 24h 边界。
+11. **多数据源只做合并，不做去重猜测。** 每个会话带 `source`/`uid`（`source:id`）；不同 DSH 的
+    同名 id 也不要合并。缺失的 source 要在 `report.sources[].error` 暴露，面板继续显示其余 source。
 
 ## 4. 服务端行为
 

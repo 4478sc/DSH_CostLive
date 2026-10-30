@@ -281,7 +281,7 @@ export function aggregateDayStats(days) {
     const daySessions = Array.isArray(day.sessions) ? day.sessions : [];
     for (let sessionIndex = 0; sessionIndex < daySessions.length; sessionIndex += 1) {
       const session = daySessions[sessionIndex] ?? {};
-      const sessionId = session.id ?? `?${sessionIndex}`;
+      const sessionId = session.uid || session.id || `?${sessionIndex}`;
       sessionSeen[sessionId] = true;
       sessionCost[sessionId] = (sessionCost[sessionId] || 0) + (session.costMicroCny || 0);
 
@@ -528,7 +528,9 @@ function applyTimeRange(doc, options) {
   var filtered = allSessions === null ? null : filterSessionsByRange(allSessions, range, now);
   var visible = Object.create(null);
   if (filtered !== null) {
-    for (var index = 0; index < filtered.length; index += 1) visible[filtered[index].id] = true;
+    for (var index = 0; index < filtered.length; index += 1) {
+      visible[filtered[index].uid || filtered[index].id] = true;
+    }
   }
 
   var section = doc.getElementById('sessions');

@@ -15,6 +15,9 @@ export function sessionRecord({ meta, analysis, projection }) {
   const isSubagent = typeof meta.isSubagent === 'boolean' ? meta.isSubagent : isSubagentSession(meta, projection);
   return {
     id: meta.id,
+    uid: meta.source ? `${meta.source}:${meta.id}` : meta.id,
+    source: meta.source ?? null,
+    sourceHome: meta.sourceHome ?? null,
     title: meta.title,
     cwd: meta.cwd,
     workspaceDir: meta.workspaceDir,
@@ -129,10 +132,12 @@ export function buildDailyReport(results, pricing) {
       day.totals.costMicroCny += record.costMicroCny ?? 0;
       day.totals.samples += 1;
 
-      let session = day.sessions.get(meta.id);
+      let session = day.sessions.get(`${meta.source ?? ''}\u0000${meta.id}`);
       if (session === undefined) {
         session = {
           id: meta.id,
+          uid: meta.source ? `${meta.source}:${meta.id}` : meta.id,
+          source: meta.source ?? null,
           title: meta.title ?? null,
           running: meta.running === true,
           isSubagent: meta.isSubagent === true,
@@ -185,6 +190,8 @@ export function buildDailyReport(results, pricing) {
     const sessions = [...entry.sessions.values()]
       .map((session) => ({
         id: session.id,
+        uid: session.uid,
+        source: session.source ?? null,
         title: session.title,
         running: session.running,
         isSubagent: session.isSubagent,
@@ -259,6 +266,8 @@ export function buildTimeRangeDataset({ sessions, pricing, pageSize = 5, daily }
       }));
       return {
         id: session.id,
+        uid: session.uid ?? session.id,
+        source: session.source ?? null,
         createdAt: typeof session.createdAt === 'number' ? session.createdAt : null,
         running: session.running === true,
         isSubagent: session.isSubagent === true,
@@ -291,6 +300,8 @@ export function buildTimeRangeDataset({ sessions, pricing, pageSize = 5, daily }
       },
       sessions: day.sessions.map((session) => ({
         id: session.id,
+        uid: session.uid ?? session.id,
+        source: session.source ?? null,
         title: session.title,
         running: session.running === true,
         isSubagent: session.isSubagent === true,
@@ -311,7 +322,7 @@ export function buildTimeRangeDataset({ sessions, pricing, pageSize = 5, daily }
 }
 
 /** Build the complete report object emitted by `--format json`. */
-export function buildReport({ home, pricing, results, generatedAt }) {
+export function buildReport({ home, sources = [], pricing, results, generatedAt }) {
   const sessions = results.map(sessionRecord);
   // Running main -> running subagent -> completed (cost/time order within each
   // bucket). buildReport is shared by the CLI, JSON/CSV output, and the live
@@ -361,6 +372,12 @@ export function buildReport({ home, pricing, results, generatedAt }) {
     },
     sessions,
     daily: buildDailyReport(results, pricing),
+    sources: sources.map((source) => ({
+      label: source.label,
+      home: source.home,
+      sessions: source.sessions ?? 0,
+      error: source.error ?? null,
+    })),
   };
 }
 

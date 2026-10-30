@@ -315,7 +315,11 @@ export async function startLiveServer(options = {}) {
 
   logger.log?.('dsh-cost live · 实时费用面板');
   logger.log?.(`  地址   ${url}`);
-  logger.log?.(`  数据   ${current.report.home}`);
+  logger.log?.(
+    current.report.sources?.length > 0
+      ? `  数据   ${current.report.sources.map((source) => `${source.label}=${source.sessions}${source.error ? '(offline)' : ''}`).join(' · ')}`
+      : `  数据   ${current.report.home}`,
+  );
   logger.log?.(`  刷新   每 ${Math.round(intervalMs / 1000)} 秒（浏览器拉取 /api/fragment）`);
   logger.log?.(`  会话   ${current.report.summary.sessions} 个 · ${formatCny(current.report.summary.costCny)} · ${formatTokens(current.report.summary.totalTokens)} tokens`);
   logger.log?.('  停止   Ctrl+C');

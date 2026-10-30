@@ -98,13 +98,15 @@ node bin/dsh-cost.mjs report --format html --out out/report.html
 
 ## 5. 验收清单
 
-- [ ] `npm test` → 61 pass / 0 fail
+- [ ] `npm test` → 64 pass / 0 fail
 - [ ] `node bin/dsh-cost.mjs models` 同时显示谷值表、峰值表、别名
 - [ ] 总览首屏运行中会话在最前（若有）
 - [ ] 报告/面板默认 5 条，按钮文案「显示更多（还有 N 个）」
 - [ ] 四档范围切换后卡片金额、模型表、列表同步变化，刷新后选择保留
 - [ ] 「按会话 / 按天」切换后：按天视图跨午夜会话拆成两天，日桶之和等于总费用
 - [ ] `?view=daily&range=today` 能直接打开按天视图（URL 参数优先于本地存储）
+- [ ] `node bin\dsh-cost.mjs --sources config\sources.json` 同时列出主机与 VM，来源标签正确
+- [ ] `dsh-cost-vm-sync.cmd` 在 VM 开机时能增量同步；VM 关机时只提示、不中断面板
 - [ ] 实时页 20 秒后原地更新，滚动与展开行不丢
 - [ ] `--host 0.0.0.0` 时才可从其他设备访问（默认仅本机）
 - [ ] 没有把 `out/`、`demo-home/` 或真实日志提交进仓库

@@ -44,6 +44,8 @@ const HELP = `dsh-cost-live — DSH 会话费用实时面板（CNY）
   --no-auto-reload      --watch 生成的页面不自动重载（只写文件）
   --server-url <url>    独立页面里“实时版”链接的目标（默认 http://127.0.0.1:<port>/）
   --home <dir>          DSH 数据目录（默认 $DSH_HOME 或 ~/.dsh）
+  --source <label=dir>  追加一个数据源；可重复（例如 主机 / VM）
+  --sources <file>      从 JSON 读取多个数据源（label + home）
   --pricing <file>      自定义价格表 JSON（默认 config/pricing.json）
   --model <text>        仅包含使用该模型（子串匹配）的会话
   --workspace <text>    按工作区目录名过滤
@@ -73,6 +75,7 @@ const VALUE_FLAGS = new Set([
   'interval',
   'out',
   'home',
+  'sources',
   'pricing',
   'model',
   'workspace',
@@ -115,6 +118,15 @@ function parseArgs(argv) {
       options.help = true;
       continue;
     }
+    if (name === 'source') {
+      if (value === undefined) {
+        value = argv[index + 1];
+        index += 1;
+      }
+      if (value === undefined) throw new Error(`选项 --${name} 需要一个值`);
+      (options.source ??= []).push(value);
+      continue;
+    }
     if (VALUE_FLAGS.has(name)) {
       if (value === undefined) {
         value = argv[index + 1];
@@ -147,6 +159,8 @@ function intInRange(value, name, min, max) {
 function reportOptionsFrom(options) {
   const reportOptions = {};
   if (options.home !== undefined) reportOptions.home = options.home;
+  if (options.source !== undefined) reportOptions.sources = options.source;
+  if (options.sources !== undefined) reportOptions.sourcesPath = options.sources;
   if (options.pricing !== undefined) reportOptions.pricingPath = options.pricing;
   if (options.model !== undefined) reportOptions.model = options.model;
   if (options.workspace !== undefined) reportOptions.workspace = options.workspace;

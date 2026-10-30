@@ -14,11 +14,16 @@ function modelsLabel(analysis) {
 }
 
 /** Summary table over analyzed sessions. */
-export function renderList(results, { pricing, home, generatedAt }) {
+export function renderList(results, { pricing, home, sources = [], generatedAt }) {
   const lines = [];
   const priced = results.filter((result) => result.analysis.totals.costMicroCny > 0);
+  const multiSource = Array.isArray(sources) && sources.length > 1;
   lines.push(`DSH 会话费用  ·  ${pricing.currency}  ·  ${pricing.unitTokens.toLocaleString('en-US')} tokens 计价`);
-  lines.push(`数据目录  ${home}`);
+  if (multiSource) {
+    lines.push(`数据源  ${sources.map((source) => `${source.label}: ${source.home}${source.error ? '（不可用）' : ''}`).join(' · ')}`);
+  } else {
+    lines.push(`数据目录  ${home}`);
+  }
   lines.push(`会话 ${results.length} 个  ·  产生费用 ${priced.length} 个  ·  ${formatTime(generatedAt)}`);
   if (results.length === 0) {
     lines.push('', '没有找到会话日志。');
@@ -35,7 +40,7 @@ export function renderList(results, { pricing, home, generatedAt }) {
     return [
       truncateDisplay(meta.id, 16),
       `${runningMark}${formatTime(meta.createdAt).slice(0, 10)}`,
-      truncateDisplay(meta.title ?? '(untitled)', 18),
+      truncateDisplay(`${multiSource && meta.source ? `[${meta.source}] ` : ''}${meta.title ?? '(untitled)'}`, 18),
       truncateDisplay(modelsLabel(analysis), 16),
       formatTokens(analysis.totals.tokens.uncachedInputTokens),
       formatTokens(analysis.totals.tokens.outputTokens),

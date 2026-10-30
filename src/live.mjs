@@ -14,7 +14,8 @@ import { analyzeEvents } from './engine.mjs';
 import { loadPricing } from './pricing.mjs';
 import { buildReport } from './report-data.mjs';
 import { escapeHtml, renderHtml } from './report-html.mjs';
-import { discoverSessions, readSession, resolveHome } from './sessions.mjs';
+import { discoverSessions, readSession } from './sessions.mjs';
+import { loadSources } from './sources.mjs';
 import { timeRangeRuntimeSource } from './time-range.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -138,29 +139,54 @@ function filterResults(results, options) {
  * @returns {object} the same document emitted by `dsh-cost report --format json`.
  */
 export function collectLiveReport(options = {}) {
-  const home = resolveHome(options.home);
-  if (!existsSync(home)) throw new Error(`DSH 数据目录不存在: ${home}`);
+  const sources = loadSources({
+    sources: options.sources,
+    sourcesPath: options.sourcesPath,
+    home: options.home,
+  });
   const pricing =
     options.pricingDocument ??
     loadPricing(options.pricingPath === undefined ? undefined : resolve(options.pricingPath));
   const since = parseDateBound(options.since, false);
   const until = parseDateBound(options.until, true);
-  const descriptors = discoverSessions({ home, workspace: options.workspace, since, until });
   const results = [];
-  for (const descriptor of descriptors) {
-    try {
-      const { meta, events, projection } = readSession(descriptor);
-      results.push({ meta, analysis: analyzeEvents(events, pricing), projection });
-    } catch (error) {
-      if (typeof options.onWarning === 'function') {
-        options.onWarning(`无法读取 ${descriptor.logPath}: ${error.message}`);
+  const sourceStats = [];
+  for (const source of sources) {
+    if (!existsSync(source.home)) {
+      const message = `DSH 数据目录不存在: ${source.home}`;
+      if (typeof options.onWarning === 'function') options.onWarning(`${source.label}: ${message}`);
+      sourceStats.push({ label: source.label, home: source.home, sessions: 0, error: message });
+      continue;
+    }
+    let scanned = 0;
+    const descriptors = discoverSessions({ home: source.home, workspace: options.workspace, since, until });
+    for (const descriptor of descriptors) {
+      try {
+        const { meta, events, projection } = readSession(descriptor);
+        meta.source = source.label;
+        meta.sourceHome = source.home;
+        results.push({ meta, analysis: analyzeEvents(events, pricing), projection });
+        scanned += 1;
+      } catch (error) {
+        if (typeof options.onWarning === 'function') {
+          options.onWarning(`${source.label}: 无法读取 ${descriptor.logPath}: ${error.message}`);
+        }
       }
     }
+    sourceStats.push({ label: source.label, home: source.home, sessions: scanned, error: null });
+  }
+  if (sourceStats.every((source) => source.error !== null)) {
+    throw new Error(`没有可用的 DSH 数据目录：${sources.map((source) => `${source.label}=${source.home}`).join(', ')}`);
+  }
+  const filtered = filterResults(results, options);
+  for (const source of sourceStats) {
+    source.sessions = filtered.filter((result) => result.meta.source === source.label).length;
   }
   return buildReport({
-    home,
+    home: sources[0].home,
+    sources: sourceStats,
     pricing,
-    results: filterResults(results, options),
+    results: filtered,
     generatedAt: Date.now(),
   });
 }
@@ -188,6 +214,7 @@ export function summarizeReport(report) {
     generatedAt: report.generatedAt,
     generatedAtISO: report.generatedAtISO,
     home: report.home,
+    sources: report.sources ?? [],
     currency: report.currency,
     unitTokens: report.unitTokens,
     sessions: report.summary.sessions,

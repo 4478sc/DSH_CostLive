@@ -49,6 +49,36 @@ node bin\dsh-cost-live.mjs --home demo-home
 
 ---
 
+## 同时监测主机与 VMware 里的 DSH
+
+宿主机的面板可以同时读两个 DSH：本机 `~/.dsh` 和 Ubuntu VM 里的 `~/.dsh`。VM 数据通过增量镜像接入，不需要在 VM 上跑服务：
+
+```powershell
+# 1) 保持这个窗口打开：每 20 秒增量同步 VM 的 sessions + projcache
+dsh-cost-vm-sync.cmd
+
+# 2) 正常启动面板（dsh-cost-live.cmd 已带 --sources config\sources.json）
+dsh-cost-live.cmd
+```
+
+`config/sources.json`：
+
+```json
+{
+  "sources": [
+    { "label": "主机", "home": "~/.dsh" },
+    { "label": "VM", "home": "../../.dsh-vm" }
+  ]
+}
+```
+
+- 镜像默认在 `.dsh-vm/`，只复制 `sessions/` 与 `storages/session_projcache/`，增量传输，已在 `.gitignore` 中。
+- VM 关机或未同步时，面板继续显示主机数据，并在顶部提示数据源不可用；同步脚本每 60 秒重试。
+- 会话列表、按天视图和模型汇总都会合并两边数据，会话行带「主机 / VM」标签。
+- CLI 也支持：`node bin\dsh-cost.mjs --sources config\sources.json`。
+
+---
+
 ## 方案 B：本地实时服务（推荐）
 
 ### 启动
@@ -264,6 +294,8 @@ dsh-cost-live --once             生成一次独立 HTML 后退出
 | `--no-auto-reload` | `--watch` 只写文件，不让页面自动重载 |
 | `--server-url <url>` | 独立页面里「实时版」链接指向的地址 |
 | `--home <dir>` | DSH 数据目录，默认 `$DSH_HOME` 或 `~/.dsh` |
+| `--source <label=dir>` | 追加一个数据源，可重复（例如 `主机=~/.dsh`） |
+| `--sources <file>` | 从 JSON 读取多个数据源（`dsh-cost-live.cmd` 默认用 `config\sources.json`） |
 | `--pricing <file>` | 自定义价格表 JSON |
 | `--model <text>` | 仅包含使用该模型（子串匹配）的会话 |
 | `--workspace <text>` | 按工作区目录名过滤 |

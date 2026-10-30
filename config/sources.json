@@ -1,0 +1,6 @@
+{
+  "sources": [
+    { "label": "主机", "home": "~/.dsh" },
+    { "label": "VM", "home": "../../.dsh-vm" }
+  ]
+}

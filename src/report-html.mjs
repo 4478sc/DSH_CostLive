@@ -72,6 +72,15 @@ export function renderHtml(report) {
   const dailyDays = Array.isArray(report.daily?.days) ? report.daily.days : [];
   const maxDayCost = Math.max(0, ...dailyDays.map((day) => day.totals.costMicroCny));
   const todayKey = formatDay(report.generatedAt);
+  const sources = Array.isArray(report.sources) ? report.sources : [];
+  const multiSource = sources.length > 1;
+  const sourceErrors = sources.filter((source) => source.error !== null && source.error !== undefined);
+  const sourceBadge = (label) =>
+    multiSource && label ? `<span class="chip chip-source">${escapeHtml(label)}</span>` : '';
+  const sourceText =
+    sources.length > 0
+      ? sources.map((source) => `${source.label}: ${source.home}${source.error ? '（不可用）' : ''}`).join(' · ')
+      : report.home;
   const models = aggregateModels(sessions, pricing);
   const billable = summary.inputTokens + summary.cacheWriteTokens + summary.cacheReadTokens;
   const cacheSavingMicro = Math.round(models.reduce((sum, model) => sum + model.cacheSavingMicro, 0));
@@ -157,11 +166,11 @@ export function renderHtml(report) {
           </tr>`,
         )
         .join('');
-      return `<tr class="${rowClass}" data-target="${target}" data-session="${escapeHtml(session.id)}" data-created-at="${session.createdAt ?? ''}" data-running="${running}"${hiddenAttr}>
+      return `<tr class="${rowClass}" data-target="${target}" data-session="${escapeHtml(session.uid ?? session.id)}" data-created-at="${session.createdAt ?? ''}" data-running="${running}"${hiddenAttr}>
           <td class="muted nowrap">${formatTime(session.createdAt).slice(0, 10)}</td>
           <td>
             <div class="title">${escapeHtml(session.title ?? '(untitled)')}</div>
-            <div class="mono subtle">${escapeHtml(session.id)}</div>
+            <div class="mono subtle">${escapeHtml(session.id)} ${sourceBadge(session.source)}</div>
             ${flags === '' ? '' : `<div class="flags">${flags}</div>`}
           </td>
           <td>${modelChips || '<span class="muted">—</span>'}</td>
@@ -171,7 +180,7 @@ export function renderHtml(report) {
             ${bar(session.totals.costMicroCny, maxCost)}
           </td>
         </tr>
-        <tr class="${detailClass}" id="${target}" data-session="${escapeHtml(session.id)}" data-created-at="${session.createdAt ?? ''}"${hiddenAttr}>
+        <tr class="${detailClass}" id="${target}" data-session="${escapeHtml(session.uid ?? session.id)}" data-created-at="${session.createdAt ?? ''}"${hiddenAttr}>
           <td colspan="5">
             <div class="detail-inner">
               <div class="detail-meta">
@@ -205,7 +214,7 @@ export function renderHtml(report) {
             )
             .join('');
           return `<tr>
-            <td><div class="title">${escapeHtml(session.title ?? '(untitled)')}</div><div class="mono subtle">${escapeHtml(session.id)}</div></td>
+            <td><div class="title">${escapeHtml(session.title ?? '(untitled)')}</div><div class="mono subtle">${escapeHtml(session.id)} ${sourceBadge(session.source)}</div></td>
             <td>${chips || '<span class="muted">—</span>'}</td>
             <td class="num">${formatTokens(session.tokens.totalTokens)}</td>
             <td class="num muted">${session.samples}</td>
@@ -242,6 +251,10 @@ export function renderHtml(report) {
   const unpricedNote =
     unpriced.length > 0
       ? `<div class="note warn">未配置价格的模型：${unpriced.map(escapeHtml).join('、')}。其 token 正常统计，但费用记为 0。</div>`
+      : '';
+  const sourceErrorNote =
+    sourceErrors.length > 0
+      ? `<div class="note warn">数据源不可用：${sourceErrors.map((source) => `${escapeHtml(source.label)}（${escapeHtml(source.home)}）`).join('、')}。请检查镜像是否已同步，或运行 dsh-cost-vm-sync.cmd。</div>`
       : '';
 
   return `<!doctype html>
@@ -299,6 +312,7 @@ export function renderHtml(report) {
   .title { font-weight: 550; max-width: 360px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .chip { display: inline-block; background: #eef2f6; border: 1px solid var(--line); border-radius: 999px; padding: 1px 8px; font-family: var(--mono); font-size: 11px; margin: 1px 2px; }
   .chip-warn { background: var(--warn-soft); border-color: #fcd34d; color: var(--warn); }
+  .chip-source { background: #eef2ff; border-color: #c7d2fe; color: #3730a3; font-weight: 650; }
   .flags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
   .pill { display: inline-flex; align-items: center; gap: 4px; border-radius: 999px; padding: 0 7px; font-size: 10.5px; font-weight: 650; line-height: 17px; white-space: nowrap; }
   .pill-run { background: #dcfce7; border: 1px solid #bbf7d0; color: #15803d; }
@@ -402,7 +416,7 @@ export function renderHtml(report) {
     <div>
       <div class="eyebrow">DeepSeek Harness · Cost Report</div>
       <h1>会话费用报告</h1>
-      <div class="sub">生成于 ${escapeHtml(formatTime(report.generatedAt))} · 数据目录 <code>${escapeHtml(report.home)}</code></div>
+      <div class="sub">生成于 ${escapeHtml(formatTime(report.generatedAt))} · 数据源 <code>${escapeHtml(sourceText)}</code></div>
     </div>
     <div class="badge">${escapeHtml(report.currency)} · ${formatTokens(report.unitTokens)} tokens 计价</div>
   </div>
@@ -445,6 +459,7 @@ export function renderHtml(report) {
     </div>
   </div>
 
+  ${sourceErrorNote}
   ${unpricedNote}
 
   <section>

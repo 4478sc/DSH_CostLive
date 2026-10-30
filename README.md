@@ -72,7 +72,7 @@ Windows 上也可以直接双击：
 
 | 文件 | 作用 |
 |---|---|
-| `dsh-cost-live.cmd` | 本地 HTTP 服务（推荐，页面原地刷新）；读取 `config\sources.json`，默认合并主机 + VM |
+| `dsh-cost-live.cmd` | 本地 HTTP 服务（推荐，页面原地刷新）；读取 `config\sources.json`，默认合并主机 + VM，并自动拉起 VM 同步循环（已在跑则复用） |
 | `dsh-cost-vm-sync.cmd` | 每 20 秒把 VM 的 `~/.dsh` 增量同步到 `.dsh-vm/`，保持窗口打开 |
 | `dsh-cost-live-watch.cmd` | 后台每 20 秒重建独立 HTML，供 `file:///` 打开 |
 
@@ -105,18 +105,18 @@ node bin/dsh-cost-live.mjs --host 0.0.0.0                 # 局域网访问（�
 
 主机和 Ubuntu VM 各跑一个 DSH 时，面板可以同时读两边，不需要把日志传到外部服务：
 
-1. **启动同步**（保持窗口打开；每 20 秒增量拉取 VM 的 `~/.dsh`）：
-
-   ```powershell
-   dsh-cost-vm-sync.cmd
-   # 单次：powershell -ExecutionPolicy Bypass -File tools\sync-vm-dsh.ps1
-   ```
-
-2. **启动面板**：
+1. **启动面板**（启动器会顺带拉起 VM 同步循环，已有循环则复用，不会开第二个窗口）：
 
    ```powershell
    dsh-cost-live.cmd
    # 或：node bin\dsh-cost-live.mjs --sources config\sources.json
+   ```
+
+   会多出一个同步窗口，每 20 秒增量拉取 VM 的 `~/.dsh`；同步窗口独立于面板窗口，关掉面板不影响它，需要时也可以单独重开：
+
+   ```powershell
+   dsh-cost-vm-sync.cmd
+   # 单次：powershell -ExecutionPolicy Bypass -File tools\sync-vm-dsh.ps1
    ```
 
 `config/sources.json` 定义数据源，`home` 支持 `~` 与相对路径（相对该 JSON 文件）：
@@ -291,7 +291,8 @@ DSH_CostLive/
 ├─ docs/                      # 架构、DSH token 口径调研、开发笔记
 ├─ assets/preview*.png        # 截图（会话视图 / 按天视图，演示数据）
 ├─ LIVE.md                    # 实时面板完整使用说明
-├─ dsh-cost-live.cmd          # Windows 启动器：HTTP 服务（主机 + VM）
+├─ tools/start-vm-sync.ps1    # 面板启动器调用的同步守护（pid 锁 + 心跳去重）
+├─ dsh-cost-live.cmd          # Windows 启动器：HTTP 服务（主机 + VM），并拉起同步
 ├─ dsh-cost-vm-sync.cmd       # Windows 启动器：持续同步 VM 数据
 └─ dsh-cost-live-watch.cmd    # Windows 启动器：后台重建 HTML
 ```

@@ -388,7 +388,8 @@
 
   /* --------------------------------------------------------------- refresh */
 
-  function applyFragment(html) {
+  function applyFragment(payload) {
+    var html = payload && payload.html;
     if (typeof html !== 'string' || html.indexOf('<div class="wrap"') === -1) {
       throw new Error('返回的数据格式不正确');
     }
@@ -402,6 +403,12 @@
     var current = document.getElementById('live-wrap');
     if (!current) throw new Error('页面结构已变化');
     current.replaceWith(imported);
+    // The cards are recomputed from the embedded dataset, so it has to travel
+    // with every fragment; otherwise a long-open tab freezes its totals.
+    if (payload && payload.dataset) {
+      var dataNode = document.getElementById('dsh-cost-data');
+      if (dataNode) dataNode.textContent = JSON.stringify(payload.dataset);
+    }
     restoreOpen(open);
     applyView();
     window.scrollTo(0, scrollY);
@@ -453,7 +460,7 @@
         if (requestId !== state.requestId) return;
         var before = currentSummary();
         if (payload.html !== state.lastHtml) {
-          applyFragment(payload.html);
+          applyFragment(payload);
           state.lastHtml = payload.html;
         }
         state.busy = false;

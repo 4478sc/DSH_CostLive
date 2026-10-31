@@ -13,7 +13,7 @@ import { sortSessionResults } from './activity.mjs';
 import { analyzeEvents } from './engine.mjs';
 import { loadPricing } from './pricing.mjs';
 import { buildReport } from './report-data.mjs';
-import { escapeHtml, renderHtml } from './report-html.mjs';
+import { buildReportDataset, escapeHtml, renderHtml } from './report-html.mjs';
 import { discoverSessions, readSession } from './sessions.mjs';
 import { sortCostMicro } from './money.mjs';
 import { applyOfficialOverlay, loadOfficialReport } from './opencode-usage.mjs';
@@ -268,6 +268,7 @@ export function renderLiveFragment(report) {
     generatedAtISO: report.generatedAtISO,
     summary: summarizeReport(report),
     html: body,
+    dataset: buildReportDataset(report),
   };
 }
 

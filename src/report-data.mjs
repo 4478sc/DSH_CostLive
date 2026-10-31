@@ -283,6 +283,7 @@ export function buildTimeRangeDataset({ sessions, pricing, pageSize = 5, daily }
         model: model.model ?? null,
         priced: model.priced === true,
         costMicroCny: model.costMicroCny,
+        costMicroUsd: model.costMicroUsd ?? 0,
         cacheSavingMicro: model.priceKey === 'opencode-official' ? 0 : Math.round(modelCacheSavingMicro(model, pricing)),
         cacheSavingMicroUsd: model.cacheSavingMicroUsd ?? 0,
         tokens: {
@@ -300,6 +301,7 @@ export function buildTimeRangeDataset({ sessions, pricing, pageSize = 5, daily }
         running: session.running === true,
         isSubagent: session.isSubagent === true,
         costMicroCny: session.totals.costMicroCny,
+        costMicroUsd: session.totals.costMicroUsd ?? 0,
         cacheSavingMicro: models.reduce((sum, model) => sum + model.cacheSavingMicro, 0),
         cacheSavingMicroUsd: models.reduce((sum, model) => sum + model.cacheSavingMicroUsd, 0),
         tokens: {

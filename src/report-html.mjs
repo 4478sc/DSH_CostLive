@@ -63,6 +63,20 @@ function aggregateModels(sessions, pricing) {
   return [...map.values()].sort((a, b) => sortCostMicro(b) - sortCostMicro(a));
 }
 
+/**
+ * The dataset embedded in the page and pushed with every live fragment, so the
+ * client can recompute cards for any range without a round trip.
+ */
+export function buildReportDataset(report) {
+  const pricing = {
+    currency: report.currency,
+    unitTokens: report.unitTokens,
+    models: report.pricing?.models ?? {},
+    aliases: report.pricing?.aliases ?? {},
+  };
+  return buildTimeRangeDataset({ sessions: report.sessions, daily: report.daily, pricing, pageSize: SESSION_PAGE_SIZE });
+}
+
 /** Render a bar whose width is relative to `max`. */
 function bar(value, max, className = '') {
   const width = max <= 0 ? 0 : Math.max(2, Math.round((value / max) * 100));
@@ -100,9 +114,7 @@ export function renderHtml(report) {
   // Every session is serialized into the page; the inline client filters this
   // dataset locally, so one report serves all four time ranges and no-JS still
   // sees the complete server render.
-  const datasetJson = JSON.stringify(
-    buildTimeRangeDataset({ sessions, daily: report.daily, pricing, pageSize: SESSION_PAGE_SIZE }),
-  ).replace(/</gu, '\\u003c');
+  const datasetJson = JSON.stringify(buildReportDataset(report)).replace(/</gu, '\\u003c');
   const rangeNote = `${formatRangeLabel('all', report.generatedAt)} · ${sessions.length} 个会话`;
 
   const priceRows = Object.entries(pricing.models)

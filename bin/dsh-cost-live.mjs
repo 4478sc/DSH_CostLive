@@ -9,6 +9,7 @@
  */
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { formatMoney } from '../src/money.mjs';
 import { formatCny, formatTokens } from '../src/pricing.mjs';
 import {
   DEFAULT_INTERVAL_MS,
@@ -204,7 +205,7 @@ async function runWatch({ outPath, intervalMs, autoReload, serverUrl, title, rep
       lastSignature = signature;
       const verb = changed ? '已更新' : '已刷新';
       console.log(
-        `[${clockLabel()}] ${verb} ${target} · ${report.summary.sessions} 会话 · ${formatCny(report.summary.costCny)} · ${formatTokens(report.summary.totalTokens)} tokens (${elapsed}ms)`,
+        `[${clockLabel()}] ${verb} ${target} · ${report.summary.sessions} 会话 · ${formatMoney(report.summary.costMicroCny, report.summary.costMicroUsd)} · ${formatTokens(report.summary.totalTokens)} tokens (${elapsed}ms)`,
       );
       if (open && !opened) {
         opened = true;
@@ -307,7 +308,7 @@ async function main(argv) {
       });
       process.stdout.write(`HTML 已生成: ${target}\n`);
       process.stdout.write(
-        `会话 ${report.summary.sessions} 个 · 总费用 ${formatCny(report.summary.costCny)} · Token ${formatTokens(report.summary.totalTokens)}\n`,
+        `会话 ${report.summary.sessions} 个 · 总费用 ${formatMoney(report.summary.costMicroCny, report.summary.costMicroUsd)} · Token ${formatTokens(report.summary.totalTokens)}\n`,
       );
       if (options['auto-reload'] === true) {
         process.stdout.write('页面每 ' + Math.round(intervalMs / 1000) + ' 秒自动重载；需配合 dsh-cost-live-watch.cmd 重建文件。\n');

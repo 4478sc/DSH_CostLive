@@ -163,10 +163,11 @@ export async function startLiveServer(options = {}) {
       `${formatTokens(report.summary.totalTokens)} tokens`,
     ];
     if (previous !== null) {
-      const deltaCost = report.summary.costMicroCny - previous.summary.costMicroCny;
+      const deltaCny = report.summary.costMicroCny - previous.summary.costMicroCny;
+      const deltaUsd = (report.summary.costMicroUsd ?? 0) - (previous.summary.costMicroUsd ?? 0);
       const deltaTokens = report.summary.totalTokens - previous.summary.totalTokens;
-      if (deltaCost > 0 || deltaTokens > 0) {
-        parts.push(`(+${formatCny(deltaCost / 1e6)} · +${formatTokens(deltaTokens)} tokens)`);
+      if (deltaCny > 0 || deltaUsd > 0 || deltaTokens > 0) {
+        parts.push(`(+${formatMoney(Math.max(0, deltaCny), Math.max(0, deltaUsd))} · +${formatTokens(deltaTokens)} tokens)`);
       }
     }
     parts.push(`${scanMs}ms`);

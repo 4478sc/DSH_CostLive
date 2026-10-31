@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildReport } from '../src/report-data.mjs';
+import { buildReport, buildTimeRangeDataset } from '../src/report-data.mjs';
+import { renderLiveFragment } from '../src/live.mjs';
+import { aggregateRangeStats } from '../src/time-range.mjs';
 import {
   applyOfficialOverlay,
   groupBySession,
@@ -168,4 +170,64 @@ test('official cache saving is priced in USD when rates are configured', () => {
   assert.equal(analysis.totals.cacheSavingMicro, 0);
   const plain = officialAnalysis(rows);
   assert.equal(plain.totals.cacheSavingMicroUsd, 0);
+});
+
+test('the browser dataset carries USD through to the range summary', () => {
+  const pricing = { currency: 'CNY', unitTokens: 1_000_000, models: {}, aliases: {} };
+  const buckets = { uncachedInputTokens: 10, outputTokens: 5, cacheWriteTokens: 0, cacheReadTokens: 100 };
+  const report = buildReport({
+    home: 'test',
+    sources: [],
+    pricing,
+    results: [
+      {
+        meta: { id: 'official-1', title: 'off', createdAt: 1793400000000, source: '主机', official: true },
+        analysis: {
+          records: [{ time: 1793400000000, provider: 'opencode', model: 'deepseek-v4.1-flash', priceKey: 'opencode-official', priced: true, buckets, costMicroCny: 0, costMicroUsd: 2_500_000 }],
+          totals: { tokens: { ...buckets }, totalTokens: 115, costMicroCny: 0, costCny: 0, costMicroUsd: 2_500_000, costUsd: 2.5, cacheHit: 0.9, samples: 1 },
+          byModel: [{ provider: 'opencode', model: 'deepseek-v4.1-flash', priceKey: 'opencode-official', priced: true, tokens: { ...buckets }, costMicroCny: 0, costCny: 0, costMicroUsd: 2_500_000, costUsd: 2.5, cacheSavingMicroUsd: 16_000, share: 1, samples: 1 }],
+          byTurn: [],
+          unpricedModels: [],
+        },
+      },
+    ],
+    generatedAt: 1793400200000,
+  });
+  const dataset = buildTimeRangeDataset({ sessions: report.sessions, pricing, daily: report.daily });
+  assert.equal(dataset.sessions[0].costMicroUsd, 2_500_000, 'session row keeps USD');
+  assert.equal(dataset.sessions[0].models[0].costMicroUsd, 2_500_000, 'model row keeps USD');
+  assert.equal(dataset.sessions[0].models[0].cacheSavingMicro, 0, 'official rows must not claim CNY savings');
+  assert.equal(dataset.sessions[0].models[0].cacheSavingMicroUsd, 16_000);
+  const stats = aggregateRangeStats(dataset.sessions);
+  assert.equal(stats.costMicroUsd, 2_500_000, 'range summary keeps USD');
+  assert.equal(stats.costMicroCny, 0);
+  assert.equal(stats.cacheSavingMicroUsd, 16_000);
+});
+
+test('live fragments carry a fresh dataset so cards do not freeze', () => {
+  const pricing = { currency: 'CNY', unitTokens: 1_000_000, models: {}, aliases: {} };
+  const buckets = { uncachedInputTokens: 10, outputTokens: 5, cacheWriteTokens: 0, cacheReadTokens: 100 };
+  const report = buildReport({
+    home: 'test',
+    sources: [],
+    pricing,
+    results: [
+      {
+        meta: { id: 'official-2', title: 'off', createdAt: 1793400000000, source: '主机', official: true },
+        analysis: {
+          records: [{ time: 1793400000000, provider: 'opencode', model: 'deepseek-v4.1-flash', priceKey: 'opencode-official', priced: true, buckets, costMicroCny: 0, costMicroUsd: 2_500_000 }],
+          totals: { tokens: { ...buckets }, totalTokens: 115, costMicroCny: 0, costCny: 0, costMicroUsd: 2_500_000, costUsd: 2.5, cacheHit: 0.9, samples: 1 },
+          byModel: [{ provider: 'opencode', model: 'deepseek-v4.1-flash', priceKey: 'opencode-official', priced: true, tokens: { ...buckets }, costMicroCny: 0, costCny: 0, costMicroUsd: 2_500_000, costUsd: 2.5, share: 1, samples: 1 }],
+          byTurn: [],
+          unpricedModels: [],
+        },
+      },
+    ],
+    generatedAt: 1793400200000,
+  });
+  const fragment = renderLiveFragment(report);
+  assert.equal(fragment.dataset.sessions[0].costMicroUsd, 2_500_000);
+  assert.equal(fragment.dataset.sessions[0].models[0].costMicroUsd, 2_500_000);
+  assert.ok(fragment.html.includes('$2.5000'), 'server card shows the USD half');
+  assert.equal(fragment.summary.costUsd, 2.5);
 });

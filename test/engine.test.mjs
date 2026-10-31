@@ -118,6 +118,24 @@ test('stream usage chunks are read from assistant/attempt', () => {
   assert.equal(result.totals.tokens.outputTokens, 3);
 });
 
+test('opencode providers are pending official billing, never CNY estimates', () => {
+  seq = 0;
+  const tiered = normalizePricing({
+    models: { 'deepseek-v4.1-flash': { input: 0.15, output: 0.6, cacheWrite: 0.15, cacheRead: 0.003 } },
+  });
+  const events = [
+    event('model/selection', { provider: 'opencode-go', model: 'deepseek-v4.1-flash' }),
+    assistantMessage(usage(1000, 100)),
+  ];
+  const result = analyzeEvents(events, tiered);
+  assert.equal(result.totals.costMicroCny, 0);
+  assert.deepEqual(result.records.map((record) => record.costMicroCny), [0]);
+  assert.equal(result.records[0].priceKey, 'opencode-pending');
+  assert.equal(result.records[0].priced, false);
+  assert.deepEqual(result.unpricedModels, []);
+  assert.deepEqual(result.pendingModels, ['deepseek-v4.1-flash']);
+});
+
 test('prices each sample by the clock of its own timestamp', () => {
   const tiered = normalizePricing({
     models: {
@@ -134,7 +152,7 @@ test('prices each sample by the clock of its own timestamp', () => {
   const peakAt = Date.parse('2026-10-26T02:00:00Z');
   const offPeakAt = Date.parse('2026-10-26T12:00:00Z');
   const events = [
-    { type: 'request/header', seq: 0, time: peakAt, data: { header: { config: { provider: 'opencode-go', model: 'deepseek-v4.1-flash' } } } },
+    { type: 'request/header', seq: 0, time: peakAt, data: { header: { config: { provider: 'deepseek', model: 'deepseek-v4.1-flash' } } } },
     { type: 'assistant/message', seq: 1, time: peakAt, data: { turn: 1, step: 1, usage: usage(1000, 100) } },
     { type: 'assistant/message', seq: 2, time: offPeakAt, data: { turn: 2, step: 1, usage: usage(1000, 100) } },
   ];

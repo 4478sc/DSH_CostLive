@@ -152,7 +152,10 @@ function filterResults(results, options) {
       result.analysis.byModel.some((entry) => String(entry.model ?? '').toLowerCase().includes(needle)),
     );
   }
-  if (options['priced-only'] === true) filtered = filtered.filter((result) => result.analysis.totals.costMicroCny > 0);
+  if (options['priced-only'] === true)
+    filtered = filtered.filter(
+      (result) => (result.analysis.totals.costMicroCny ?? 0) > 0 || (result.analysis.totals.costMicroUsd ?? 0) > 0,
+    );
   if (options.all !== true) filtered = filtered.filter((result) => result.analysis.totals.samples > 0);
   // Cost order still decides what `--top` selects; running-first ordering is
   // applied afterwards so the flag keeps meaning "highest cost".

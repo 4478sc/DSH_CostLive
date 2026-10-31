@@ -26,6 +26,15 @@ function money(cnyMicro, usdMicro) {
   return formatMoney(cnyMicro, usdMicro);
 }
 
+/**
+ * Cost cell for one model row. Official-provider usage without a console row
+ * yet is "pending official bill", not a missing CNY price.
+ */
+function modelCostText(model) {
+  if (model.priceKey === 'opencode-pending') return '待官网';
+  return model.priced ? money(model.costMicroCny, model.costMicroUsd) : '未定价';
+}
+
 /** Aggregate per-model totals across all sessions. */
 function aggregateModels(sessions, pricing) {
   const map = new Map();
@@ -148,7 +157,7 @@ export function renderHtml(report) {
         <td class="num">${formatTokens(model.tokens.outputTokens)}</td>
         <td class="num">${formatTokens(model.tokens.cacheWriteTokens)}</td>
         <td class="num">${formatTokens(model.tokens.cacheReadTokens)}</td>
-        <td class="num strong">${model.priced ? money(model.costMicroCny, model.costMicroUsd) : '未定价'}</td>
+        <td class="num strong">${modelCostText(model)}</td>
         <td class="num muted">${model.sessions.size}</td>
       </tr>`,
     )
@@ -184,7 +193,7 @@ export function renderHtml(report) {
             <td class="num">${formatTokens(model.tokens.outputTokens)}</td>
             <td class="num">${formatTokens(model.tokens.cacheWriteTokens)}</td>
             <td class="num">${formatTokens(model.tokens.cacheReadTokens)}</td>
-            <td class="num strong">${model.priced ? money(model.costMicroCny, model.costMicroUsd) : '未定价'}</td>
+            <td class="num strong">${modelCostText(model)}</td>
             <td class="num muted">${formatPercent(model.share)}</td>
           </tr>`,
         )
@@ -199,7 +208,7 @@ export function renderHtml(report) {
           <td>${modelChips || '<span class="muted">—</span>'}</td>
           <td class="num">${formatTokens(session.totals.totalTokens)}</td>
           <td class="cost-cell">
-            <span class="strong">${session.totals.costMicroCny > 0 || session.totals.costMicroUsd > 0 ? money(session.totals.costMicroCny, session.totals.costMicroUsd) : '<span class="muted">—</span>'}</span>
+            <span class="strong">${session.officialPending === true ? '<span class="muted">待官网</span>' : session.totals.costMicroCny > 0 || session.totals.costMicroUsd > 0 ? money(session.totals.costMicroCny, session.totals.costMicroUsd) : '<span class="muted">—</span>'}</span>
             ${bar(sortCostMicro(session.totals), maxCost)}
           </td>
         </tr>
@@ -287,6 +296,11 @@ export function renderHtml(report) {
     officialWindows !== null
       ? `<div class="note${staleStore ? ' warn' : ''}">官方口径：今天 ${formatUsd(officialWindows.today)}（本地日）· 7 天 ${formatUsd(officialWindows['7d'])} · 30 天 ${formatUsd(officialWindows['30d'])}（滚动 24 小时 ×N，与官网一致）。本页按自然日切分，7 天窗口会比官网略小。归档 ${storeAgeText}${staleStore ? '——同步循环可能已停止，请检查 dsh-cost-opencode-sync.cmd' : ''}。</div>`
       : '';
+  const pendingCount = sessions.filter((session) => session.officialPending === true).length;
+  const pendingNote =
+    pendingCount === 0
+      ? ''
+      : '<div class="note">待官网：' + pendingCount + ' 个会话走 opencode 官方计费但归档里还没有对应请求记录，费用不再按 CNY 价表估算；同步循环补齐后自动变成 $ 金额。</div>';
   const officialNote =
     official !== null && official.sessions > 0
       ? `<div class="note">官方用量：${official.sessions} 个会话的 token 与费用取自 OpenCode 控制台日志（${official.requests} 条请求，按 USD 计费，不折算），本地归档仅作备份。</div>`
@@ -500,7 +514,7 @@ export function renderHtml(report) {
 
   ${sourceErrorNote}
   ${unpricedNote}
-  ${officialNote}
+  ${officialNote}${pendingNote}
   ${consoleNote}
 
   <section>

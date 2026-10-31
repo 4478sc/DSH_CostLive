@@ -63,6 +63,21 @@ export const DEFAULT_PRICING = Object.freeze({
   }),
 });
 
+/**
+ * Providers whose authoritative bill is the OpenCode console (USD), not the
+ * local CNY price table. A session routed through one of these must never be
+ * priced from config/pricing.json: the console row is the invoice, and a CNY
+ * estimate would be a different number for the same request.
+ */
+export const OFFICIAL_PROVIDERS = Object.freeze(['opencode', 'opencode-go']);
+
+/** True when the provider is billed by the official OpenCode console. */
+export function isOfficialProvider(provider) {
+  if (typeof provider !== 'string' || provider === '') return false;
+  const value = provider.toLowerCase();
+  return OFFICIAL_PROVIDERS.some((prefix) => value.startsWith(prefix));
+}
+
 const PRICE_FIELDS = ['input', 'output', 'cacheWrite', 'cacheRead'];
 /** `Intl` weekday short names in ISO order (Monday = 1). */
 const WEEKDAY_INDEX = { Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6, Sun: 7 };

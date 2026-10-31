@@ -150,9 +150,13 @@ node bin/dsh-cost-live.mjs --host 0.0.0.0                 # 局域网访问（�
   和 `cost`（USD），因此能按会话精确对上 DSH 会话。
 - **上游只留 30 天**：响应里的 `retentionDays` 就是保留期。`tools/opencode-sync.mjs` 每 60 秒增量拉一次，
   追加到 `.opencode-usage/requests.jsonl`（append-only，按请求 `id` 去重），过期后本地仍有全量备份。
-- **按会话覆盖**：某个会话存在官方记录、且本地模型全属 `opencode*` 时，token 与费用改用官方值
-  （`priceKey = opencode-official`，费用 = `cost(USD) × fxUsdCny`）；混用其它供应商的会话保持本地口径，
-  不会被半截覆盖。页面顶部会显示「官方用量：N 个会话…」。
+- **严格官方计费**：`opencode` / `opencode-go` 会话**只用 OpenCode 控制台账单**，
+  `config/pricing.json` 的 CNY 价表对它们完全不参与（判断在 `src/pricing.mjs` 的 `OFFICIAL_PROVIDERS`）。
+  有官方记录时整单替换为 USD（`priceKey = opencode-official`，费用 = 官方 `cost`，不折算）；
+  归档里还没有该会话的请求时显示「待官网」，费用记 0，**不会**退回去用 CNY 单价估算；
+  同步补齐后自动变成 `$` 金额。混用其它供应商的会话保持本地 CNY 口径，不会被半截覆盖。
+- **页面提示**：顶部「官方用量：N 个会话…」统计已覆盖的会话；另一行「待官网：N 个会话…」列出暂无归档记录的
+  opencode 会话。CLI 的 COST 列与模型明细同样显示 `待官网`。
 - **两套货币，互不折算**：官方费用保留 USD（`costMicroUsd`），本地价表仍是 CNY；会话、模型、每日、总计都同时带两列，显示成 `￥N1+$N2`，合计也只相加同币种。仅排序时用一个固定常数把两者放在同一队列（`SORT_USD_TO_CNY`，不参与任何求和）。
 - **官网口径对照**：同步时顺带记录控制台的 `/usage/cost-by-day`（按 UTC 日），页面会显示「官网口径（UTC 日）：今天 / 7 天 / 30 天」。面板自身按**本机时区**切日，与官网窗口相差 8 小时，7 天这种短窗口差额最明显——对照这两行数字就能解释差异。
 - **官方缓存节省按 USD 计**：`config/official.json` 的 `usdRates`（每 1M token 的 USD 单价，用官方账单拟合）只用来算“缓存省了多少”：`cacheReadTokens × (input − cacheRead)`。缺该模型就记 0，不会拿 CNY 价表去套官方会话。
@@ -163,7 +167,7 @@ node bin/dsh-cost-live.mjs --host 0.0.0.0                 # 局域网访问（�
 node tools\opencode-sync.mjs --stats     # 归档概况：条数、会话数、时间范围、USD 合计
 node tools\opencode-sync.mjs             # 增量同步一次
 node tools\opencode-sync.mjs --loop      # 每 60 秒同步；dsh-cost-live.cmd 会自动拉起
-node bin\dsh-cost.mjs --no-official      # 临时退回纯本地推算
+node bin\dsh-cost.mjs --no-official      # 临时不看官方归档（opencode 会话仍待官网，不回退 CNY）
 ```
 
 `dsh-cost-live.cmd` 现在会同时拉起两个后台循环：VM 镜像同步与 OpenCode 日志同步；已在运行的不重复启动
@@ -221,7 +225,9 @@ HTML 报告与实时页都提供「按会话 / 按天」切换（存于 `localSt
 
 ### 价格表
 
-默认价表在 [`config/pricing.json`](config/pricing.json)，单位 **CNY / 1,000,000 tokens**：
+默认价表在 [`config/pricing.json`](config/pricing.json)，单位 **CNY / 1,000,000 tokens**。
+该表只给**非** opencode 提供方（例如 `aicodemirror1` 的 claude）估算 CNY；
+`opencode` / `opencode-go` 一律按控制台账单计 USD，见上一节：
 
 | 模型 | 输入（未缓存） | 输出 | 缓存写 | 缓存读 |
 |---|---:|---:|---:|---:|
@@ -341,15 +347,16 @@ npm test
 | 文件 | 项数 | 覆盖 |
 |---|---:|---|
 | `pricing.test.mjs` | 11 | 价格归一、别名、通配、峰谷判定、micro-CNY 精度、内置表一致性 |
-| `engine.test.mjs` | 8 | 流式样本替换、重试、四桶归并、零用量、模型切换 |
+| `engine.test.mjs` | 9 | 流式样本替换、重试、四桶归并、零用量、模型切换、opencode 待官网 |
 | `activity.test.mjs` | 7 | `openStep` 权威性、`turnBoundary` 回退、子代理双通道识别、三桶稳定排序 |
 | `time-range.test.mjs` | 18 | 四档边界、缺失日期、聚合算术、浏览器运行时、DOM 事件、存储容错、HTML 集成 |
 | `daily.test.mjs` | 7 | 跨午夜拆分、未知时间桶、自然日边界、按天聚合去重、按天视图 DOM/存储 |
 | `live.test.mjs` | 6 | 采集/过滤、模板拆分、原子写入、HTTP API |
+| `opencode-usage.test.mjs` | 13 | 官方行归一、去重、会话覆盖、窗口合计、缓存节省 |
 | `sources.test.mjs` | 3 | 多数据源解析、主机+VM 合并、缺失数据源降级 |
 | `sessions.test.mjs` | 2 | 会话发现与读取 |
 | `zstd.test.mjs` | 2 | 多 frame 解压、非压缩 JSONL 兜底 |
-| **合计** | **64** | |
+| **合计** | **78** | |
 
 CI 会在 Node 22 与 Node 24 上跑同一套测试（`.github/workflows/test.yml`）。
 Node 22 的测试进程隔离开关仍叫 `--experimental-test-isolation`，所以那边执行 `npm run test:node22`。

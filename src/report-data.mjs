@@ -29,6 +29,12 @@ export function sessionRecord({ meta, analysis, projection }) {
     running,
     isSubagent,
     official: meta.official === true,
+    officialPending:
+      meta.official !== true &&
+      (analysis.pendingModels?.length ?? 0) > 0 &&
+      (analysis.totals.costMicroCny ?? 0) === 0 &&
+      (analysis.totals.costMicroUsd ?? 0) === 0,
+    pendingModels: analysis.pendingModels ?? [],
     createdAt: meta.createdAt,
     createdAtISO: meta.createdAt === null ? null : new Date(meta.createdAt).toISOString(),
     logPath: meta.logPath,
@@ -412,6 +418,8 @@ export function buildReport({ home, sources = [], pricing, results, generatedAt 
       costUsd: round(summary.costMicroUsd / 1e6),
       cacheHit: billedInput === 0 ? null : round(summary.cacheReadTokens / billedInput, 4),
       unpricedModels: [...new Set(sessions.flatMap((session) => session.unpricedModels))],
+      pendingSessions: sessions.filter((session) => session.officialPending === true).length,
+      pendingModels: [...new Set(sessions.flatMap((session) => session.pendingModels ?? []))],
     },
     sessions,
     daily: buildDailyReport(results, pricing),

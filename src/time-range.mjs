@@ -210,6 +210,7 @@ export function aggregateRangeStats(sessions) {
         entry = {
           provider: model.provider ?? null,
           model: model.model ?? null,
+          priceKey: model.priceKey ?? null,
           priced: model.priced === true,
           tokens: zeroTokens(),
           costMicroCny: 0,
@@ -309,6 +310,7 @@ export function aggregateDayStats(days) {
           entry = {
             provider: model.provider ?? null,
             model: model.model ?? null,
+            priceKey: model.priceKey ?? null,
             priced: model.priced === true,
             tokens: zeroTokens(),
             costMicroCny: 0,
@@ -343,6 +345,7 @@ export function aggregateDayStats(days) {
     .map((entry) => ({
       provider: entry.provider,
       model: entry.model,
+      priceKey: entry.priceKey,
       priced: entry.priced,
       tokens: entry.tokens,
       costMicroCny: entry.costMicroCny,
@@ -407,7 +410,7 @@ function renderModelTable(doc, models) {
       '<td class="num">' + formatTokens(tokens.outputTokens || 0) + '</td>' +
       '<td class="num">' + formatTokens(tokens.cacheWriteTokens || 0) + '</td>' +
       '<td class="num">' + formatTokens(tokens.cacheReadTokens || 0) + '</td>' +
-      '<td class="num strong">' + (model.priced ? formatMoney(model.costMicroCny, model.costMicroUsd) : '未定价') + '</td>' +
+      '<td class="num strong">' + (model.priceKey === 'opencode-pending' ? '待官网' : (model.priced ? formatMoney(model.costMicroCny, model.costMicroUsd) : '未定价')) + '</td>' +
       '<td class="num muted">' + model.sessions + '</td>' +
       '</tr>';
   }

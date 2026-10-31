@@ -12,7 +12,7 @@
  * Record semantics make the totals exact without delta subtraction: one record
  * per billed attempt; a replacement overwrites its record; a retry appends.
  */
-import { addBuckets, billedInputTokens, costMicroCny, resolvePrice, zeroBuckets } from './pricing.mjs';
+import { addBuckets, billedInputTokens, costMicroCny, isOfficialProvider, resolvePrice, zeroBuckets } from './pricing.mjs';
 
 /** The last provider usage sample embedded in an assistant settlement's stream. */
 export function usageFromEvent(event) {
@@ -99,7 +99,10 @@ export function analyzeEvents(events, pricing) {
         const buckets = bucketsFromUsage(usage);
         const turn = Number.isInteger(event.data?.turn) ? event.data.turn : 0;
         const step = Number.isInteger(event.data?.step) ? event.data.step : 0;
-        const resolved = resolvePrice(active.model, pricing);
+        // opencode/opencode-go is billed by the OpenCode console: its cost only
+        // exists as official USD rows, so the CNY table must stay out of it.
+        const officialProvider = isOfficialProvider(active.provider);
+        const resolved = officialProvider ? null : resolvePrice(active.model, pricing);
         const record = {
           seq: event.seq,
           time: event.time,
@@ -107,15 +110,16 @@ export function analyzeEvents(events, pricing) {
           step,
           provider: active.provider,
           model: active.model,
-          priceKey: resolved?.key ?? null,
+          priceKey: officialProvider ? 'opencode-pending' : (resolved?.key ?? null),
           priced: resolved !== null,
+          officialProvider,
           buckets,
           // `event.time` selects the tier: two-tier models (DeepSeek) bill
           // off-peak samples at the discounted rate of the sample's own clock.
           costMicroCny: resolved === null ? 0 : costMicroCny(buckets, resolved.price, event.time),
           costMicroUsd: 0,
         };
-        if (!resolved && active.model) warnings.push(`no price for model "${active.model}" (provider ${active.provider ?? 'unknown'})`);
+        if (!officialProvider && !resolved && active.model) warnings.push(`no price for model "${active.model}" (provider ${active.provider ?? 'unknown'})`);
         if (last !== null && last.turn === turn && last.step === step) {
           if (bucketsEqual(records[last.index].buckets, buckets)) continue;
           records[last.index] = record;
@@ -145,6 +149,7 @@ export function analyzeEvents(events, pricing) {
         model: record.model,
         priceKey: record.priceKey,
         priced: record.priced,
+        officialProvider: record.officialProvider === true,
         tokens: zeroBuckets(),
         costMicroCny: 0,
         costMicroUsd: 0,
@@ -186,7 +191,10 @@ export function analyzeEvents(events, pricing) {
     }))
     .sort((a, b) => a.turn - b.turn);
 
-  const unpricedModels = [...new Set(billed.filter((record) => !record.priced).map((record) => record.model).filter(Boolean))];
+  const unpricedModels = [...new Set(billed.filter((record) => !record.priced && record.officialProvider !== true).map((record) => record.model).filter(Boolean))];
+  // Official-provider usage with no archived console row yet: tokens are real,
+  // the amount is "pending official bill" rather than a CNY estimate.
+  const pendingModels = [...new Set(billed.filter((record) => record.officialProvider === true).map((record) => record.model).filter(Boolean))];
 
   return {
     records: billed,
@@ -204,6 +212,7 @@ export function analyzeEvents(events, pricing) {
     byModel,
     byTurn,
     unpricedModels,
+    pendingModels,
     warnings: [...new Set(warnings)],
   };
 }

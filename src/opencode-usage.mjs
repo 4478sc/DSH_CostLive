@@ -14,10 +14,10 @@
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, resolve } from 'node:path';
-import { addBuckets, billedInputTokens, zeroBuckets } from './pricing.mjs';
+import { OFFICIAL_PROVIDERS, addBuckets, billedInputTokens, zeroBuckets } from './pricing.mjs';
 
 export const OFFICIAL_STORE_VERSION = 1;
-export const DEFAULT_PROVIDERS = ['opencode', 'opencode-go'];
+export const DEFAULT_PROVIDERS = [...OFFICIAL_PROVIDERS];
 
 /** Session ids differ only by DSH's optional `session-` prefix upstream. */
 export function sessionKey(id) {

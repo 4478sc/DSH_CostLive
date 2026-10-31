@@ -37,7 +37,9 @@ export function renderList(results, { pricing, home, sources = [], generatedAt }
     const costCell =
     (analysis.totals.costMicroCny ?? 0) > 0 || (analysis.totals.costMicroUsd ?? 0) > 0
       ? formatMoney(analysis.totals.costMicroCny, analysis.totals.costMicroUsd)
-      : '—';
+      : (analysis.pendingModels?.length ?? 0) > 0
+        ? '待官网'
+        : '—';
     // Running rows are already sorted first; the marker explains why a cheaper
     // session can appear above an expensive completed one.
     const runningMark = meta.running === true ? (meta.isSubagent === true ? '●子 ' : '● ') : '';
@@ -87,6 +89,14 @@ export function renderList(results, { pricing, home, sources = [], generatedAt }
     `合计  in ${formatTokens(totals.input)}  ·  out ${formatTokens(totals.output)}  ·  cacheW ${formatTokens(totals.cacheWrite)}  ·  cacheR ${formatTokens(totals.cacheRead)}  ·  ${formatMoney(Math.round(totals.costCny * 1e6), Math.round(totals.costUsd * 1e6))}`,
   );
   const unpriced = [...new Set(results.flatMap((result) => result.analysis.unpricedModels))];
+  const pending = [
+    ...new Set(
+      results
+        .filter((result) => result.meta.official !== true && (result.analysis.pendingModels?.length ?? 0) > 0)
+        .flatMap((result) => result.analysis.pendingModels),
+    ),
+  ];
+  if (pending.length > 0) lines.push('待官网（opencode 官方计费，暂不用 CNY 价表）：' + pending.join(', '));
   if (unpriced.length > 0) lines.push(`* 未配置价格的模型（仅计 token，不计费用）：${unpriced.join(', ')}`);
   return lines.join('\n');
 }
@@ -103,8 +113,16 @@ export function renderDetail(result, { pricing, steps = false }) {
   lines.push(`状态  ${activityLabel(meta)}`);
   lines.push(`日志  ${meta.logPath}`);
   lines.push('');
+  // A pending official bill is not ￥0: the console row has not arrived yet.
+  const pendingOnly =
+    (analysis.pendingModels?.length ?? 0) > 0 &&
+    (analysis.totals.costMicroCny ?? 0) === 0 &&
+    (analysis.totals.costMicroUsd ?? 0) === 0;
+  const costText = pendingOnly
+    ? '待官网'
+    : formatMoney(analysis.totals.costMicroCny, analysis.totals.costMicroUsd);
   lines.push(
-    `费用  ${formatMoney(analysis.totals.costMicroCny, analysis.totals.costMicroUsd)}   ·   Token ${formatTokens(analysis.totals.totalTokens)}   ·   缓存命中 ${formatPercent(analysis.totals.cacheHit)}   ·   计费采样 ${analysis.totals.samples} 次`,
+    `费用  ${costText}   ·   Token ${formatTokens(analysis.totals.totalTokens)}   ·   缓存命中 ${formatPercent(analysis.totals.cacheHit)}   ·   计费采样 ${analysis.totals.samples} 次`,
   );
 
   if (analysis.byModel.length > 0) {
@@ -112,12 +130,12 @@ export function renderDetail(result, { pricing, steps = false }) {
     const rows = analysis.byModel.map((entry) => [
       entry.provider ?? '—',
       entry.model ?? 'unknown',
-      entry.priceKey ?? '未定价',
+      entry.priceKey === 'opencode-pending' ? '待官网' : (entry.priceKey ?? '未定价'),
       formatTokens(entry.tokens.uncachedInputTokens),
       formatTokens(entry.tokens.outputTokens),
       formatTokens(entry.tokens.cacheWriteTokens),
       formatTokens(entry.tokens.cacheReadTokens),
-      entry.priced ? formatMoney(entry.costMicroCny, entry.costMicroUsd) : '—',
+      entry.priceKey === 'opencode-pending' ? '待官网' : entry.priced ? formatMoney(entry.costMicroCny, entry.costMicroUsd) : '—',
       formatPercent(entry.share),
     ]);
     lines.push(

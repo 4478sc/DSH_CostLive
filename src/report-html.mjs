@@ -276,10 +276,16 @@ export function renderHtml(report) {
       ? `<div class="note warn">未配置价格的模型：${unpriced.map(escapeHtml).join('、')}。其 token 正常统计，但费用记为 0。</div>`
       : '';
   const official = report.official ?? null;
-  const consoleTotals = report.official?.console ?? null;
+  const officialWindows = report.official?.windows ?? null;
+  const storeUpdatedAt = report.official?.storeUpdatedAt ?? null;
+  const storeAgeMinutes =
+    storeUpdatedAt === null ? null : Math.max(0, Math.round((report.generatedAt - storeUpdatedAt) / 60000));
+  const storeAgeText =
+    storeAgeMinutes === null ? '' : storeAgeMinutes < 1 ? '刚刚同步' : `${storeAgeMinutes} 分钟前同步`;
+  const staleStore = storeAgeMinutes !== null && storeAgeMinutes >= 5;
   const consoleNote =
-    consoleTotals !== null
-      ? `<div class="note">官网口径（UTC 日）：今天 ${formatUsd(consoleTotals.today)} · 7 天 ${formatUsd(consoleTotals['7d'])} · 30 天 ${formatUsd(consoleTotals['30d'])}。本页按本机时区切日，与官网窗口相差 8 小时，短窗口差额最明显。</div>`
+    officialWindows !== null
+      ? `<div class="note${staleStore ? ' warn' : ''}">官方口径：今天 ${formatUsd(officialWindows.today)}（本地日）· 7 天 ${formatUsd(officialWindows['7d'])} · 30 天 ${formatUsd(officialWindows['30d'])}（滚动 24 小时 ×N，与官网一致）。本页按自然日切分，7 天窗口会比官网略小。归档 ${storeAgeText}${staleStore ? '——同步循环可能已停止，请检查 dsh-cost-opencode-sync.cmd' : ''}。</div>`
       : '';
   const officialNote =
     official !== null && official.sessions > 0

@@ -5,7 +5,7 @@ import { renderLiveFragment } from '../src/live.mjs';
 import { aggregateRangeStats } from '../src/time-range.mjs';
 import {
   applyOfficialOverlay,
-  consoleWindowTotals,
+  officialWindowTotals,
   groupBySession,
   mergeOfficialRecords,
   normalizeLogItem,
@@ -263,21 +263,12 @@ test('daily buckets aggregate every sample of a session, not just the last', () 
   assert.equal(day.sessions[0].models[0].tokens.cacheReadTokens, 300);
 });
 
-test('console window totals follow the UTC calendar days the console uses', () => {
-  const consoleTotals = {
-    days: [
-      { date: '2026-10-29', costUsd: 1 },
-      { date: '2026-10-30', costUsd: 2 },
-      { date: '2026-10-31', costUsd: 4 },
-      { date: '2026-11-01', costUsd: 8 },
-    ],
-    updatedAt: 1,
-  };
-  const now = Date.parse('2026-11-01T03:00:00Z');
-  const totals = consoleWindowTotals(consoleTotals, now);
-  assert.equal(totals.today, 8);
-  assert.equal(totals['7d'], 15);
-  assert.equal(totals['30d'], 15);
-  assert.equal(totals.all, 15);
-  assert.equal(consoleWindowTotals({ days: [] }, now), null);
+test('official windows: today is the local day, 7/30 days are rolling', () => {
+  const now = new Date('2026-11-01T02:00:00+08:00').getTime();
+  const at = (hoursAgo, usd) => ({ startedAt: now - hoursAgo * 3600_000, finishedAt: now - hoursAgo * 3600_000 + 1000, costUsd: usd });
+  const totals = officialWindowTotals([at(1, 0.5), at(26, 2), at(24 * 8, 4)], now);
+  assert.equal(totals.today, 0.5, 'only the request after local midnight counts as today');
+  assert.equal(totals['7d'], 2.5);
+  assert.equal(totals['30d'], 6.5);
+  assert.equal(officialWindowTotals([], now), null);
 });

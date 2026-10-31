@@ -365,29 +365,27 @@ export function loadOfficialState(storeDir) {
 }
 
 /**
- * Console totals for the windows the page offers. The console buckets by UTC
- * calendar day, the dashboard by the local day, so these are the numbers to
- * quote when comparing with `opencode.ai/console`.
+ * Official totals for the windows the console shows.
+ *
+ * Verified against the console on 2026-11-01: "Today" is the LOCAL calendar day
+ * (`getDay` boundaries of this machine), while the 7/30-day figures are rolling
+ * 24h×N windows — not calendar days. Both are computed from the archived rows,
+ * bucketed by completion time, so they line up with opencode.ai.
  */
-export function consoleWindowTotals(consoleTotals, now = Date.now()) {
-  const days = Array.isArray(consoleTotals?.days) ? consoleTotals.days : [];
-  if (days.length === 0) return null;
-  const utcDay = (ms) => new Date(ms).toISOString().slice(0, 10);
-  const key = utcDay(now);
-  const shift = (offset) => {
-    const date = new Date(`${key}T00:00:00Z`);
-    date.setUTCDate(date.getUTCDate() - offset);
-    return utcDay(date.getTime());
-  };
-  const cut7 = shift(6);
-  const cut30 = shift(29);
+export function officialWindowTotals(records, now = Date.now()) {
+  const list = Array.isArray(records) ? records : [];
+  if (list.length === 0) return null;
+  const date = new Date(now);
+  const localMidnight = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+  const day = 86_400_000;
   const totals = { today: 0, '7d': 0, '30d': 0, all: 0 };
-  for (const day of days) {
-    const usd = Number(day.costUsd) || 0;
+  for (const record of list) {
+    const usd = Number(record.costUsd) || 0;
+    const time = record.finishedAt ?? record.startedAt;
     totals.all += usd;
-    if (day.date >= cut30) totals['30d'] += usd;
-    if (day.date >= cut7) totals['7d'] += usd;
-    if (day.date === key) totals.today += usd;
+    if (time >= localMidnight) totals.today += usd;
+    if (time >= now - 7 * day) totals['7d'] += usd;
+    if (time >= now - 30 * day) totals['30d'] += usd;
   }
-  return { ...totals, days: days.length, updatedAt: consoleTotals.updatedAt ?? null };
+  return totals;
 }

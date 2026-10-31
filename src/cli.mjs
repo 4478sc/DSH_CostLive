@@ -10,7 +10,7 @@ import { buildReport, toCsv } from './report-data.mjs';
 import { renderHtml } from './report-html.mjs';
 import { renderDetail, renderList, renderModels, verifyProjection } from './report-text.mjs';
 import { discoverSessions, matchSession, readSession } from './sessions.mjs';
-import { applyOfficialOverlay, consoleWindowTotals, loadOfficialReport, loadOfficialState } from './opencode-usage.mjs';
+import { applyOfficialOverlay, loadOfficialReport, loadOfficialState, officialWindowTotals } from './opencode-usage.mjs';
 import { loadSources } from './sources.mjs';
 
 const COMMANDS = new Set(['list', 'session', 'models', 'report', 'help']);
@@ -299,7 +299,8 @@ export function main(argv = process.argv.slice(2)) {
           requests: officialReport.summary.requests,
           sessions: stats.applied,
           skippedMixed: stats.skippedMixed,
-          console: consoleWindowTotals(loadOfficialState(officialReport.config.store)?.console),
+          windows: officialWindowTotals(officialReport.records),
+          storeUpdatedAt: loadOfficialState(officialReport.config.store)?.lastSyncAt ?? null,
         };
       }
     } catch (error) {

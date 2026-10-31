@@ -52,6 +52,7 @@ export function sessionRecord({ meta, analysis, projection }) {
       costMicroCny: entry.costMicroCny,
       costUsd: round(entry.costUsd ?? 0),
       costMicroUsd: entry.costMicroUsd ?? 0,
+      cacheSavingMicroUsd: entry.cacheSavingMicroUsd ?? 0,
       share: round(entry.share, 4),
       samples: entry.samples,
     })),
@@ -115,7 +116,7 @@ export function buildDailyReport(results, pricing) {
         day: dayStart > 0 ? formatDay(dayStart) : 'unknown',
         dayStart,
         unknown: dayStart <= 0,
-        totals: { ...emptyTokens(), totalTokens: 0, costMicroCny: 0, costMicroUsd: 0, cacheSavingMicro: 0, samples: 0, cacheHit: null },
+        totals: { ...emptyTokens(), totalTokens: 0, costMicroCny: 0, costMicroUsd: 0, cacheSavingMicro: 0, cacheSavingMicroUsd: 0, samples: 0, cacheHit: null },
         sessions: new Map(),
       };
       days.set(dayStart, entry);
@@ -176,6 +177,7 @@ export function buildDailyReport(results, pricing) {
           costMicroCny: 0,
           costMicroUsd: 0,
           cacheSavingMicro: 0,
+          cacheSavingMicroUsd: 0,
           tokens: emptyTokens(),
         };
         session.models.set(modelKey, model);
@@ -187,8 +189,11 @@ export function buildDailyReport(results, pricing) {
       model.tokens.cacheWriteTokens += buckets.cacheWriteTokens;
       model.tokens.cacheReadTokens += buckets.cacheReadTokens;
 
-      const resolved = record.priced === true ? resolvePrice(record.model, pricing) : null;
-      if (resolved !== null) {
+      const officialPrice = record.priceKey === 'opencode-official';
+      const resolved = !officialPrice && record.priced === true ? resolvePrice(record.model, pricing) : null;
+      if (officialPrice) {
+        model.cacheSavingMicroUsd += record.cacheSavingMicroUsd ?? 0;
+      } else if (resolved !== null) {
         // Same formula as modelCacheSavingMicro(), rounded per day+model so the
         // browser's integer sum reproduces the server number.
         model.cacheSavingMicro += Math.round(
@@ -220,6 +225,8 @@ export function buildDailyReport(results, pricing) {
             costMicroCny: model.costMicroCny,
             costMicroUsd: model.costMicroUsd,
             cacheSavingMicro: model.cacheSavingMicro,
+          cacheSavingMicroUsd: model.cacheSavingMicroUsd ?? 0,
+            cacheSavingMicroUsd: model.cacheSavingMicroUsd,
             tokens: { ...model.tokens, totalTokens: tokensTotal(model.tokens) },
           }))
           .sort((a, b) => sortCostMicro(b) - sortCostMicro(a)),
@@ -227,12 +234,17 @@ export function buildDailyReport(results, pricing) {
       .sort((a, b) => sortCostMicro(b) - sortCostMicro(a) || String(a.title ?? '').localeCompare(String(b.title ?? '')));
 
     let cacheSavingMicro = 0;
+    let cacheSavingMicroUsd = 0;
     for (const session of sessions) {
-      for (const model of session.models) cacheSavingMicro += model.cacheSavingMicro;
+      for (const model of session.models) {
+        cacheSavingMicro += model.cacheSavingMicro;
+        cacheSavingMicroUsd += model.cacheSavingMicroUsd;
+      }
     }
     const billedInput =
       entry.totals.uncachedInputTokens + entry.totals.cacheWriteTokens + entry.totals.cacheReadTokens;
     entry.totals.cacheSavingMicro = cacheSavingMicro;
+    entry.totals.cacheSavingMicroUsd = cacheSavingMicroUsd;
     entry.totals.cacheHit =
       billedInput === 0 ? null : Math.round((entry.totals.cacheReadTokens / billedInput) * 10000) / 10000;
 
@@ -271,7 +283,8 @@ export function buildTimeRangeDataset({ sessions, pricing, pageSize = 5, daily }
         model: model.model ?? null,
         priced: model.priced === true,
         costMicroCny: model.costMicroCny,
-        cacheSavingMicro: Math.round(modelCacheSavingMicro(model, pricing)),
+        cacheSavingMicro: model.priceKey === 'opencode-official' ? 0 : Math.round(modelCacheSavingMicro(model, pricing)),
+        cacheSavingMicroUsd: model.cacheSavingMicroUsd ?? 0,
         tokens: {
           uncachedInputTokens: model.tokens.uncachedInputTokens,
           outputTokens: model.tokens.outputTokens,
@@ -288,6 +301,7 @@ export function buildTimeRangeDataset({ sessions, pricing, pageSize = 5, daily }
         isSubagent: session.isSubagent === true,
         costMicroCny: session.totals.costMicroCny,
         cacheSavingMicro: models.reduce((sum, model) => sum + model.cacheSavingMicro, 0),
+        cacheSavingMicroUsd: models.reduce((sum, model) => sum + model.cacheSavingMicroUsd, 0),
         tokens: {
           uncachedInputTokens: session.totals.uncachedInputTokens,
           outputTokens: session.totals.outputTokens,

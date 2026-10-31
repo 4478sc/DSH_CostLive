@@ -8,6 +8,13 @@
       "opencode",
       "opencode-go"
     ],
-    "product": null
+    "product": null,
+    "usdRates": {
+      "deepseek-v4.1-flash": {
+        "input": 0.162771,
+        "output": 0.667402,
+        "cacheRead": 0.002948
+      }
+    }
   }
 }

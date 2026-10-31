@@ -30,11 +30,11 @@ export function formatUsd(value) {
   return '$' + value.toFixed(digits);
 }
 
-/** "¥12.3456", "$0.7891", or "¥12.3456 + $0.7891" when both are non-zero. */
+/** "￥12.3456", "$0.7891", or "￥12.3456+$0.7891" when both are non-zero. */
 export function formatMoney(microCny = 0, microUsd = 0) {
   const parts = [];
   if (microCny > 0) parts.push(formatCny(microCny / 1e6));
   if (microUsd > 0) parts.push(formatUsd(microUsd / 1e6));
   if (parts.length === 0) return formatCny(0);
-  return parts.join(' + ');
+  return parts.join('+');
 }

@@ -194,6 +194,7 @@ export function collectLiveReport(options = {}) {
       const stats = applyOfficialOverlay(filtered, {
         records: officialReport.records,
         providers: officialReport.config.providers,
+        usdRates: officialReport.config.usdRates ?? {},
       });
       official = {
         store: officialReport.config.store,

@@ -84,10 +84,10 @@ test('rejects malformed price documents', () => {
 });
 
 test('formats micro amounts with visible precision', () => {
-  assert.equal(formatCny(0.218823), '¥0.2188');
-  assert.equal(formatCny(0.000123), '¥0.000123');
-  assert.equal(formatCny(16.905), '¥16.9050');
-  assert.equal(formatCny(1234.5), '¥1234.50');
+  assert.equal(formatCny(0.218823), '￥0.2188');
+  assert.equal(formatCny(0.000123), '￥0.000123');
+  assert.equal(formatCny(16.905), '￥16.9050');
+  assert.equal(formatCny(1234.5), '￥1234.50');
 });
 
 test('prices the shipped DeepSeek V4.1 Flash entry and its official aliases', () => {

@@ -327,7 +327,7 @@ export function formatTokens(value) {
 export function formatCny(value) {
   const abs = Math.abs(value);
   const digits = abs >= 100 ? 2 : abs >= 1 ? 4 : abs >= 0.01 ? 4 : 6;
-  return `¥${value.toFixed(digits)}`;
+  return `￥${value.toFixed(digits)}`;
 }
 
 /** One-line rate description, e.g. "in 2.3 / out 11.5 / cacheW 2.875 / cacheR 0.23 ¥/1M". */

@@ -160,3 +160,12 @@ test('buildReport keeps CNY and USD totals apart instead of converting', () => {
   assert.equal(day.totals.costMicroCny, 1_000_000);
   assert.equal(day.totals.costMicroUsd, 2_500_000);
 });
+
+test('official cache saving is priced in USD when rates are configured', () => {
+  const rows = [normalizeLogItem(raw({ id: 'c1', cacheReadTokens: 1_000_000, inputTokens: 0, outputTokens: 0, cost: 0.02 }))];
+  const analysis = officialAnalysis(rows, { usdRates: { 'deepseek-v4.1-flash': { input: 0.16, output: 0.66, cacheRead: 0.003 } } });
+  assert.equal(analysis.totals.cacheSavingMicroUsd, Math.round(1_000_000 * (0.16 - 0.003)));
+  assert.equal(analysis.totals.cacheSavingMicro, 0);
+  const plain = officialAnalysis(rows);
+  assert.equal(plain.totals.cacheSavingMicroUsd, 0);
+});

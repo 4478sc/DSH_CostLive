@@ -101,7 +101,13 @@ export function recordTokens(record) {
  * Build the same analysis object `analyzeEvents` returns, from official rows.
  * Costs stay in USD (\`costMicroUsd\`); nothing is converted to CNY here.
  */
-export function officialAnalysis(records) {
+export function officialAnalysis(records, { usdRates = {} } = {}) {
+  /** Cache saving in micro-USD: cached tokens priced at full input minus cache rate. */
+  const savingOf = (model, tokens) => {
+    const rate = usdRates?.[model];
+    if (rate === undefined) return 0;
+    return Math.round(tokens.cacheReadTokens * (rate.input - rate.cacheRead));
+  };
   const billed = (records ?? []).filter((record) => recordTokens(record) > 0);
   const totalsBuckets = zeroBuckets();
   const models = new Map();
@@ -122,12 +128,14 @@ export function officialAnalysis(records) {
         tokens: zeroBuckets(),
         costMicroCny: 0,
         costMicroUsd: 0,
+        cacheSavingMicroUsd: 0,
         samples: 0,
       };
       models.set(key, model);
     }
     addBuckets(model.tokens, record.tokens);
     model.costMicroUsd += costMicroUsd;
+    model.cacheSavingMicroUsd += savingOf(record.model, record.tokens);
     model.samples += 1;
   }
 
@@ -149,6 +157,7 @@ export function officialAnalysis(records) {
     buckets: { ...record.tokens },
     costMicroCny: 0,
     costMicroUsd: Math.round(record.costUsd * 1e6),
+    cacheSavingMicroUsd: savingOf(record.model, record.tokens),
     official: true,
   }));
 
@@ -161,6 +170,8 @@ export function officialAnalysis(records) {
       costCny: 0,
       costMicroUsd: totalMicroUsd,
       costUsd: totalMicroUsd / 1e6,
+      cacheSavingMicro: 0,
+      cacheSavingMicroUsd: recordsOut.reduce((sum, record) => sum + record.cacheSavingMicroUsd, 0),
       billedInputTokens: billedInputTokens(totalsBuckets),
       cacheHit:
         billedInputTokens(totalsBuckets) === 0 ? null : totalsBuckets.cacheReadTokens / billedInputTokens(totalsBuckets),
@@ -184,7 +195,7 @@ function providerAllowed(provider, providers) {
  * official rows and whose local models all belong to the official provider set.
  * Mixed sessions (e.g. DeepSeek next to Claude in one session) are left alone.
  */
-export function applyOfficialOverlay(results, { records, providers = DEFAULT_PROVIDERS } = {}) {
+export function applyOfficialOverlay(results, { records, providers = DEFAULT_PROVIDERS, usdRates = {} } = {}) {
   const bySession = groupBySession(records ?? []);
   const stats = { applied: 0, skippedMixed: 0, sessions: bySession.size, records: (records ?? []).length, costUsd: 0 };
   for (const result of results) {
@@ -198,7 +209,7 @@ export function applyOfficialOverlay(results, { records, providers = DEFAULT_PRO
       continue;
     }
     result.localAnalysis ??= result.analysis;
-    result.analysis = officialAnalysis(rows);
+    result.analysis = officialAnalysis(rows, { usdRates });
     result.official = result.analysis.official;
     if (result.meta && typeof result.meta === 'object') result.meta.official = true;
     result.meta.officialCostUsd = rows.reduce((sum, record) => sum + record.costUsd, 0);

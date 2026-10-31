@@ -292,6 +292,7 @@ export function main(argv = process.argv.slice(2)) {
         const stats = applyOfficialOverlay(results, {
           records: officialReport.records,
           providers: officialReport.config.providers,
+          usdRates: officialReport.config.usdRates ?? {},
         });
         official = {
           store: officialReport.config.store,

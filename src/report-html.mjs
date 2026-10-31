@@ -43,6 +43,7 @@ function aggregateModels(sessions, pricing) {
           costMicroCny: 0,
           costMicroUsd: 0,
           cacheSavingMicro: 0,
+          cacheSavingMicroUsd: 0,
           sessions: new Set(),
         };
         map.set(key, entry);
@@ -54,7 +55,8 @@ function aggregateModels(sessions, pricing) {
       entry.costMicroCny += model.costMicroCny;
       entry.costMicroUsd += model.costMicroUsd ?? 0;
       // Rounded per model so the browser's integer sums reproduce this total.
-      entry.cacheSavingMicro += Math.round(modelCacheSavingMicro(model, pricing));
+      entry.cacheSavingMicro += model.priceKey === 'opencode-official' ? 0 : Math.round(modelCacheSavingMicro(model, pricing));
+      entry.cacheSavingMicroUsd += model.cacheSavingMicroUsd ?? 0;
       entry.sessions.add(session.id);
     }
   }
@@ -92,6 +94,7 @@ export function renderHtml(report) {
   const models = aggregateModels(sessions, pricing);
   const billable = summary.inputTokens + summary.cacheWriteTokens + summary.cacheReadTokens;
   const cacheSavingMicro = Math.round(models.reduce((sum, model) => sum + model.cacheSavingMicro, 0));
+  const cacheSavingMicroUsd = Math.round(models.reduce((sum, model) => sum + (model.cacheSavingMicroUsd ?? 0), 0));
   const pricedCount = summary.pricedSessions;
   const unpriced = summary.unpricedModels;
   // Every session is serialized into the page; the inline client filters this
@@ -467,7 +470,7 @@ export function renderHtml(report) {
     </div>
     <div class="card">
       <div class="k">缓存节省</div>
-      <div class="v" id="stat-cache-saving">${cny(cacheSavingMicro)}</div>
+      <div class="v" id="stat-cache-saving">${money(cacheSavingMicro, cacheSavingMicroUsd)}</div>
       <div class="f">相对未缓存输入价估算</div>
     </div>
   </div>

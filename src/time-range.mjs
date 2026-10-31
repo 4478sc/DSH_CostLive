@@ -180,6 +180,7 @@ export function aggregateRangeStats(sessions) {
     costMicroCny: 0,
     costMicroUsd: 0,
     cacheSavingMicro: 0,
+    cacheSavingMicroUsd: 0,
     cacheHit: null,
     models: [],
   };
@@ -198,6 +199,7 @@ export function aggregateRangeStats(sessions) {
     totals.costMicroCny += session.costMicroCny || 0;
     totals.costMicroUsd += session.costMicroUsd || 0;
     totals.cacheSavingMicro += session.cacheSavingMicro || 0;
+    totals.cacheSavingMicroUsd += session.cacheSavingMicroUsd || 0;
 
     const models = Array.isArray(session.models) ? session.models : [];
     for (let modelIndex = 0; modelIndex < models.length; modelIndex += 1) {
@@ -212,6 +214,7 @@ export function aggregateRangeStats(sessions) {
           tokens: zeroTokens(),
           costMicroCny: 0,
           costMicroUsd: 0,
+          cacheSavingMicroUsd: 0,
           sessions: 0,
         };
         map.set(key, entry);
@@ -223,6 +226,7 @@ export function aggregateRangeStats(sessions) {
       entry.tokens.cacheReadTokens += modelTokens.cacheReadTokens || 0;
       entry.costMicroCny += model.costMicroCny || 0;
       entry.costMicroUsd += model.costMicroUsd || 0;
+      entry.cacheSavingMicroUsd += model.cacheSavingMicroUsd || 0;
       entry.sessions += 1;
     }
   }
@@ -262,6 +266,7 @@ export function aggregateDayStats(days) {
     costMicroCny: 0,
     costMicroUsd: 0,
     cacheSavingMicro: 0,
+    cacheSavingMicroUsd: 0,
     samples: 0,
     cacheHit: null,
     models: [],
@@ -284,6 +289,7 @@ export function aggregateDayStats(days) {
     totals.costMicroCny += dayTotals.costMicroCny || 0;
     totals.costMicroUsd += dayTotals.costMicroUsd || 0;
     totals.cacheSavingMicro += dayTotals.cacheSavingMicro || 0;
+    totals.cacheSavingMicroUsd += dayTotals.cacheSavingMicroUsd || 0;
     totals.samples += dayTotals.samples || 0;
 
     const daySessions = Array.isArray(day.sessions) ? day.sessions : [];
@@ -308,6 +314,7 @@ export function aggregateDayStats(days) {
             costMicroCny: 0,
             costMicroUsd: 0,
             cacheSavingMicro: 0,
+            cacheSavingMicroUsd: 0,
             sessionIds: Object.create(null),
           };
           modelMap.set(key, entry);
@@ -320,6 +327,7 @@ export function aggregateDayStats(days) {
         entry.costMicroCny += model.costMicroCny || 0;
         entry.costMicroUsd += model.costMicroUsd || 0;
         entry.cacheSavingMicro += model.cacheSavingMicro || 0;
+        entry.cacheSavingMicroUsd += model.cacheSavingMicroUsd || 0;
         entry.sessionIds[sessionId] = true;
       }
     }
@@ -340,6 +348,7 @@ export function aggregateDayStats(days) {
       costMicroCny: entry.costMicroCny,
       costMicroUsd: entry.costMicroUsd,
       cacheSavingMicro: entry.cacheSavingMicro,
+      cacheSavingMicroUsd: entry.cacheSavingMicroUsd,
       sessions: Object.keys(entry.sessionIds).length,
     }))
     .sort((a, b) => sortCostMicro(b) - sortCostMicro(a));
@@ -488,7 +497,7 @@ function applyDailyView(doc, range, now, days) {
   setText(doc.getElementById('stat-tokens-note'), 'in ' + formatTokens(stats.uncachedInputTokens) + ' · out ' + formatTokens(stats.outputTokens));
   setText(doc.getElementById('stat-cache-read'), formatTokens(stats.cacheReadTokens));
   setText(doc.getElementById('stat-cache-read-note'), '占计费输入 ' + formatPercent(stats.cacheHit));
-  setText(doc.getElementById('stat-cache-saving'), formatCny(stats.cacheSavingMicro / 1e6));
+  setText(doc.getElementById('stat-cache-saving'), formatMoney(stats.cacheSavingMicro, stats.cacheSavingMicroUsd));
   renderModelTable(doc, stats.models);
 
   var empty = doc.getElementById('daily-empty');
@@ -591,7 +600,7 @@ function applyTimeRange(doc, options) {
     setText(doc.getElementById('stat-tokens-note'), 'in ' + formatTokens(stats.uncachedInputTokens) + ' · out ' + formatTokens(stats.outputTokens));
     setText(doc.getElementById('stat-cache-read'), formatTokens(stats.cacheReadTokens));
     setText(doc.getElementById('stat-cache-read-note'), '占计费输入 ' + formatPercent(stats.cacheHit));
-    setText(doc.getElementById('stat-cache-saving'), formatCny(stats.cacheSavingMicro / 1e6));
+    setText(doc.getElementById('stat-cache-saving'), formatMoney(stats.cacheSavingMicro, stats.cacheSavingMicroUsd));
     renderModelTable(doc, stats.models);
   }
 

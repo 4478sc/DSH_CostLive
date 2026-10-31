@@ -142,7 +142,10 @@ export function buildDailyReport(results, pricing) {
       day.totals.costMicroUsd += record.costMicroUsd ?? 0;
       day.totals.samples += 1;
 
-      let session = day.sessions.get(`${meta.source ?? ''}\u0000${meta.id}`);
+      // Key on source+id: two sources can hold the same session id, and the
+      // insert below has to use the same key the lookup uses.
+      const sessionKey = `${meta.source ?? ''}\u0000${meta.id}`;
+      let session = day.sessions.get(sessionKey);
       if (session === undefined) {
         session = {
           id: meta.id,
@@ -157,7 +160,7 @@ export function buildDailyReport(results, pricing) {
           tokens: emptyTokens(),
           models: new Map(),
         };
-        day.sessions.set(meta.id, session);
+        day.sessions.set(sessionKey, session);
       }
       session.costMicroCny += record.costMicroCny ?? 0;
       session.costMicroUsd += record.costMicroUsd ?? 0;
@@ -325,7 +328,9 @@ export function buildTimeRangeDataset({ sessions, pricing, pageSize = 5, daily }
         cacheReadTokens: day.totals.cacheReadTokens,
         totalTokens: day.totals.totalTokens,
         costMicroCny: day.totals.costMicroCny,
+        costMicroUsd: day.totals.costMicroUsd ?? 0,
         cacheSavingMicro: day.totals.cacheSavingMicro,
+        cacheSavingMicroUsd: day.totals.cacheSavingMicroUsd ?? 0,
         samples: day.totals.samples,
         cacheHit: day.totals.cacheHit,
       },
@@ -347,6 +352,7 @@ export function buildTimeRangeDataset({ sessions, pricing, pageSize = 5, daily }
           costMicroCny: model.costMicroCny,
           costMicroUsd: model.costMicroUsd ?? 0,
           cacheSavingMicro: model.cacheSavingMicro,
+          cacheSavingMicroUsd: model.cacheSavingMicroUsd ?? 0,
           tokens: { ...model.tokens },
         })),
       })),

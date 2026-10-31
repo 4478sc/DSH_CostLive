@@ -231,3 +231,33 @@ test('live fragments carry a fresh dataset so cards do not freeze', () => {
   assert.ok(fragment.html.includes('$2.5000'), 'server card shows the USD half');
   assert.equal(fragment.summary.costUsd, 2.5);
 });
+
+test('daily buckets aggregate every sample of a session, not just the last', () => {
+  const pricing = { currency: 'CNY', unitTokens: 1_000_000, models: { 'deepseek-v4.1-flash': { input: 0.15, output: 0.6, cacheWrite: 0.15, cacheRead: 0.003 } }, aliases: {} };
+  const buckets = { uncachedInputTokens: 10, outputTokens: 5, cacheWriteTokens: 0, cacheReadTokens: 100 };
+  const record = (time) => ({ time, provider: 'opencode', model: 'deepseek-v4.1-flash', priceKey: 'opencode-official', priced: true, buckets, costMicroCny: 0, costMicroUsd: 1_000_000 });
+  const records = [record(1793400000000), record(1793400600000), record(1793401200000)];
+  const report = buildReport({
+    home: 'test',
+    sources: [],
+    pricing,
+    results: [
+      {
+        meta: { id: 'multi-1', title: 'multi', createdAt: 1793400000000, source: '主机', official: true },
+        analysis: {
+          records,
+          totals: { tokens: { uncachedInputTokens: 30, outputTokens: 15, cacheWriteTokens: 0, cacheReadTokens: 300 }, totalTokens: 345, costMicroCny: 0, costCny: 0, costMicroUsd: 3_000_000, costUsd: 3, cacheHit: 0.9, samples: 3 },
+          byModel: [],
+          byTurn: [],
+          unpricedModels: [],
+        },
+      },
+    ],
+    generatedAt: 1793402000000,
+  });
+  const day = report.daily.days.find((d) => d.unknown !== true && d.sessions.length === 1);
+  assert.equal(day.totals.cacheReadTokens, 300);
+  assert.equal(day.sessions[0].tokens.cacheReadTokens, 300, 'session keeps all samples');
+  assert.equal(day.sessions[0].costMicroUsd, 3_000_000);
+  assert.equal(day.sessions[0].models[0].tokens.cacheReadTokens, 300);
+});

@@ -11,7 +11,10 @@
  *
  * Display order: running main session -> running subagent -> completed session.
  * Within one bucket the existing cost/time order stays as the tie-breaker.
+ * Cost order uses the mixed-currency key from money.mjs (USD is never summed).
  */
+
+import { sortCostMicro } from './money.mjs';
 
 export const ACTIVITY_RUNNING_MAIN = 0;
 export const ACTIVITY_RUNNING_SUBAGENT = 1;
@@ -67,7 +70,7 @@ export function activityLabel(activity) {
 export function compareActivity(a, b) {
   const rank = activityRank(a) - activityRank(b);
   if (rank !== 0) return rank;
-  const cost = (b.costMicroCny ?? 0) - (a.costMicroCny ?? 0);
+  const cost = sortCostMicro(b) - sortCostMicro(a);
   if (cost !== 0) return cost;
   return (b.createdAt ?? 0) - (a.createdAt ?? 0);
 }
@@ -77,12 +80,12 @@ export function compareSessionResults(a, b) {
   return compareActivity(
     {
       ...sessionActivity(a),
-      costMicroCny: a.analysis?.totals?.costMicroCny ?? 0,
+      ...a.analysis?.totals,
       createdAt: a.meta?.createdAt ?? 0,
     },
     {
       ...sessionActivity(b),
-      costMicroCny: b.analysis?.totals?.costMicroCny ?? 0,
+      ...b.analysis?.totals,
       createdAt: b.meta?.createdAt ?? 0,
     },
   );
@@ -96,8 +99,8 @@ export function sortSessionResults(results) {
 /** Comparator for built session records (JSON/HTML output). */
 export function compareSessionRecords(a, b) {
   return compareActivity(
-    { running: a.running, isSubagent: a.isSubagent, costMicroCny: a.totals?.costMicroCny ?? 0, createdAt: a.createdAt ?? 0 },
-    { running: b.running, isSubagent: b.isSubagent, costMicroCny: b.totals?.costMicroCny ?? 0, createdAt: b.createdAt ?? 0 },
+    { running: a.running, isSubagent: a.isSubagent, ...a.totals, createdAt: a.createdAt ?? 0 },
+    { running: b.running, isSubagent: b.isSubagent, ...b.totals, createdAt: b.createdAt ?? 0 },
   );
 }
 

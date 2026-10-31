@@ -11,6 +11,7 @@
  * `this`/`process`/`fs` references. Editing one of them changes both surfaces.
  */
 import { formatPercent } from './format.mjs';
+import { SORT_USD_TO_CNY, formatMoney, formatUsd, sortCostMicro } from './money.mjs';
 import { formatCny, formatTokens } from './pricing.mjs';
 
 /** One day in milliseconds; `7d`/`30d` are rolling windows ending at `now`. */
@@ -177,6 +178,7 @@ export function aggregateRangeStats(sessions) {
     cacheReadTokens: 0,
     totalTokens: 0,
     costMicroCny: 0,
+    costMicroUsd: 0,
     cacheSavingMicro: 0,
     cacheHit: null,
     models: [],
@@ -187,13 +189,14 @@ export function aggregateRangeStats(sessions) {
     const session = list[index] ?? {};
     const tokens = session.tokens ?? {};
     totals.sessions += 1;
-    if ((session.costMicroCny || 0) > 0) totals.pricedSessions += 1;
+    if ((session.costMicroCny || 0) > 0 || (session.costMicroUsd || 0) > 0) totals.pricedSessions += 1;
     totals.uncachedInputTokens += tokens.uncachedInputTokens || 0;
     totals.outputTokens += tokens.outputTokens || 0;
     totals.cacheWriteTokens += tokens.cacheWriteTokens || 0;
     totals.cacheReadTokens += tokens.cacheReadTokens || 0;
     totals.totalTokens += tokens.totalTokens || 0;
     totals.costMicroCny += session.costMicroCny || 0;
+    totals.costMicroUsd += session.costMicroUsd || 0;
     totals.cacheSavingMicro += session.cacheSavingMicro || 0;
 
     const models = Array.isArray(session.models) ? session.models : [];
@@ -208,6 +211,7 @@ export function aggregateRangeStats(sessions) {
           priced: model.priced === true,
           tokens: zeroTokens(),
           costMicroCny: 0,
+          costMicroUsd: 0,
           sessions: 0,
         };
         map.set(key, entry);
@@ -218,12 +222,13 @@ export function aggregateRangeStats(sessions) {
       entry.tokens.cacheWriteTokens += modelTokens.cacheWriteTokens || 0;
       entry.tokens.cacheReadTokens += modelTokens.cacheReadTokens || 0;
       entry.costMicroCny += model.costMicroCny || 0;
+      entry.costMicroUsd += model.costMicroUsd || 0;
       entry.sessions += 1;
     }
   }
   const billedInput = totals.uncachedInputTokens + totals.cacheWriteTokens + totals.cacheReadTokens;
   totals.cacheHit = billedInput === 0 ? null : Math.round((totals.cacheReadTokens / billedInput) * 10000) / 10000;
-  totals.models = [...map.values()].sort((a, b) => b.costMicroCny - a.costMicroCny);
+  totals.models = [...map.values()].sort((a, b) => sortCostMicro(b) - sortCostMicro(a));
   return totals;
 }
 
@@ -255,6 +260,7 @@ export function aggregateDayStats(days) {
     cacheReadTokens: 0,
     totalTokens: 0,
     costMicroCny: 0,
+    costMicroUsd: 0,
     cacheSavingMicro: 0,
     samples: 0,
     cacheHit: null,
@@ -263,6 +269,7 @@ export function aggregateDayStats(days) {
   const modelMap = new Map();
   const sessionSeen = Object.create(null);
   const sessionCost = Object.create(null);
+  const sessionCostUsd = Object.create(null);
   const list = Array.isArray(days) ? days : [];
 
   for (let index = 0; index < list.length; index += 1) {
@@ -275,6 +282,7 @@ export function aggregateDayStats(days) {
     totals.cacheReadTokens += dayTotals.cacheReadTokens || 0;
     totals.totalTokens += dayTotals.totalTokens || 0;
     totals.costMicroCny += dayTotals.costMicroCny || 0;
+    totals.costMicroUsd += dayTotals.costMicroUsd || 0;
     totals.cacheSavingMicro += dayTotals.cacheSavingMicro || 0;
     totals.samples += dayTotals.samples || 0;
 
@@ -284,6 +292,7 @@ export function aggregateDayStats(days) {
       const sessionId = session.uid || session.id || `?${sessionIndex}`;
       sessionSeen[sessionId] = true;
       sessionCost[sessionId] = (sessionCost[sessionId] || 0) + (session.costMicroCny || 0);
+      sessionCostUsd[sessionId] = (sessionCostUsd[sessionId] || 0) + (session.costMicroUsd || 0);
 
       const models = Array.isArray(session.models) ? session.models : [];
       for (let modelIndex = 0; modelIndex < models.length; modelIndex += 1) {
@@ -297,6 +306,7 @@ export function aggregateDayStats(days) {
             priced: model.priced === true,
             tokens: zeroTokens(),
             costMicroCny: 0,
+            costMicroUsd: 0,
             cacheSavingMicro: 0,
             sessionIds: Object.create(null),
           };
@@ -308,6 +318,7 @@ export function aggregateDayStats(days) {
         entry.tokens.cacheWriteTokens += modelTokens.cacheWriteTokens || 0;
         entry.tokens.cacheReadTokens += modelTokens.cacheReadTokens || 0;
         entry.costMicroCny += model.costMicroCny || 0;
+        entry.costMicroUsd += model.costMicroUsd || 0;
         entry.cacheSavingMicro += model.cacheSavingMicro || 0;
         entry.sessionIds[sessionId] = true;
       }
@@ -316,7 +327,7 @@ export function aggregateDayStats(days) {
 
   totals.sessions = Object.keys(sessionSeen).length;
   for (const id of Object.keys(sessionCost)) {
-    if (sessionCost[id] > 0) totals.pricedSessions += 1;
+    if (sessionCost[id] > 0 || sessionCostUsd[id] > 0) totals.pricedSessions += 1;
   }
   const billedInput = totals.uncachedInputTokens + totals.cacheWriteTokens + totals.cacheReadTokens;
   totals.cacheHit = billedInput === 0 ? null : Math.round((totals.cacheReadTokens / billedInput) * 10000) / 10000;
@@ -327,10 +338,11 @@ export function aggregateDayStats(days) {
       priced: entry.priced,
       tokens: entry.tokens,
       costMicroCny: entry.costMicroCny,
+      costMicroUsd: entry.costMicroUsd,
       cacheSavingMicro: entry.cacheSavingMicro,
       sessions: Object.keys(entry.sessionIds).length,
     }))
-    .sort((a, b) => b.costMicroCny - a.costMicroCny);
+    .sort((a, b) => sortCostMicro(b) - sortCostMicro(a));
   return totals;
 }
 
@@ -386,7 +398,7 @@ function renderModelTable(doc, models) {
       '<td class="num">' + formatTokens(tokens.outputTokens || 0) + '</td>' +
       '<td class="num">' + formatTokens(tokens.cacheWriteTokens || 0) + '</td>' +
       '<td class="num">' + formatTokens(tokens.cacheReadTokens || 0) + '</td>' +
-      '<td class="num strong">' + (model.priced ? formatCny(model.costMicroCny / 1e6) : '未定价') + '</td>' +
+      '<td class="num strong">' + (model.priced ? formatMoney(model.costMicroCny, model.costMicroUsd) : '未定价') + '</td>' +
       '<td class="num muted">' + model.sessions + '</td>' +
       '</tr>';
   }
@@ -470,7 +482,7 @@ function applyDailyView(doc, range, now, days) {
   }
   var stats = aggregateDayStats(filtered);
 
-  setText(doc.getElementById('stat-cost'), formatCny(stats.costMicroCny / 1e6));
+  setText(doc.getElementById('stat-cost'), formatMoney(stats.costMicroCny, stats.costMicroUsd));
   setText(doc.getElementById('stat-cost-note'), stats.sessions + ' 个会话 · ' + stats.days + ' 天（按采样）');
   setText(doc.getElementById('stat-tokens'), formatTokens(stats.totalTokens));
   setText(doc.getElementById('stat-tokens-note'), 'in ' + formatTokens(stats.uncachedInputTokens) + ' · out ' + formatTokens(stats.outputTokens));
@@ -573,7 +585,7 @@ function applyTimeRange(doc, options) {
 
   var stats = filtered === null ? null : aggregateRangeStats(filtered);
   if (stats !== null) {
-    setText(doc.getElementById('stat-cost'), formatCny(stats.costMicroCny / 1e6));
+    setText(doc.getElementById('stat-cost'), formatMoney(stats.costMicroCny, stats.costMicroUsd));
     setText(doc.getElementById('stat-cost-note'), stats.pricedSessions + ' / ' + stats.sessions + ' 个会话产生费用');
     setText(doc.getElementById('stat-tokens'), formatTokens(stats.totalTokens));
     setText(doc.getElementById('stat-tokens-note'), 'in ' + formatTokens(stats.uncachedInputTokens) + ' · out ' + formatTokens(stats.outputTokens));
@@ -691,7 +703,10 @@ export function timeRangeRuntimeSource() {
     zeroTokens,
     aggregateRangeStats,
     aggregateDayStats,
+    sortCostMicro,
     formatCny,
+    formatUsd,
+    formatMoney,
     formatTokens,
     formatPercent,
   ]
@@ -701,6 +716,7 @@ export function timeRangeRuntimeSource() {
   return `(function () {
   'use strict';
   var DAY_MS = ${DAY_MS};
+  var SORT_USD_TO_CNY = ${SORT_USD_TO_CNY};
   var STORAGE_KEY = ${JSON.stringify(TIME_RANGE_STORAGE_KEY)};
   var VIEW_KEY = ${JSON.stringify(VIEW_STORAGE_KEY)};
   var TIME_RANGES = ${JSON.stringify([...TIME_RANGES])};

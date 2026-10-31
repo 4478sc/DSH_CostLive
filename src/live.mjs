@@ -15,6 +15,7 @@ import { loadPricing } from './pricing.mjs';
 import { buildReport } from './report-data.mjs';
 import { escapeHtml, renderHtml } from './report-html.mjs';
 import { discoverSessions, readSession } from './sessions.mjs';
+import { sortCostMicro } from './money.mjs';
 import { applyOfficialOverlay, loadOfficialReport } from './opencode-usage.mjs';
 import { loadSources } from './sources.mjs';
 import { timeRangeRuntimeSource } from './time-range.mjs';
@@ -120,12 +121,15 @@ function filterResults(results, options) {
       result.analysis.byModel.some((entry) => String(entry.model ?? '').toLowerCase().includes(needle)),
     );
   }
-  if (options.pricedOnly === true) filtered = filtered.filter((result) => result.analysis.totals.costMicroCny > 0);
+  if (options.pricedOnly === true)
+      filtered = filtered.filter(
+        (result) => (result.analysis.totals.costMicroCny ?? 0) > 0 || (result.analysis.totals.costMicroUsd ?? 0) > 0,
+      );
   if (options.includeEmpty !== true) filtered = filtered.filter((result) => result.analysis.totals.samples > 0);
   // Match the CLI: cost decides --top selection, then running sessions float up.
   filtered.sort(
     (a, b) =>
-      b.analysis.totals.costMicroCny - a.analysis.totals.costMicroCny ||
+      sortCostMicro(b.analysis.totals) - sortCostMicro(a.analysis.totals) ||
       (b.meta.createdAt ?? 0) - (a.meta.createdAt ?? 0),
   );
   if (options.top !== undefined) filtered = filtered.slice(0, options.top);
@@ -189,12 +193,10 @@ export function collectLiveReport(options = {}) {
     if (officialReport !== null) {
       const stats = applyOfficialOverlay(filtered, {
         records: officialReport.records,
-        fxUsdCny: officialReport.config.fxUsdCny,
         providers: officialReport.config.providers,
       });
       official = {
         store: officialReport.config.store,
-        fxUsdCny: officialReport.config.fxUsdCny,
         requests: officialReport.summary.requests,
         sessions: stats.applied,
         skippedMixed: stats.skippedMixed,
@@ -246,6 +248,7 @@ export function summarizeReport(report) {
     sessions: report.summary.sessions,
     pricedSessions: report.summary.pricedSessions,
     costCny: report.summary.costCny,
+    costUsd: report.summary.costUsd ?? 0,
     totalTokens: report.summary.totalTokens,
     inputTokens: report.summary.inputTokens,
     outputTokens: report.summary.outputTokens,

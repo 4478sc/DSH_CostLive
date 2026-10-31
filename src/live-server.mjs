@@ -13,6 +13,7 @@
  */
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
+import { formatMoney } from './money.mjs';
 import { formatCny, formatTokens } from './pricing.mjs';
 import {
   DEFAULT_INTERVAL_MS,
@@ -158,7 +159,7 @@ export async function startLiveServer(options = {}) {
     lastSignature = signature;
     const parts = [
       `${report.summary.sessions} 会话`,
-      formatCny(report.summary.costCny),
+      formatMoney(report.summary.costMicroCny, report.summary.costMicroUsd),
       `${formatTokens(report.summary.totalTokens)} tokens`,
     ];
     if (previous !== null) {
@@ -321,7 +322,7 @@ export async function startLiveServer(options = {}) {
       : `  数据   ${current.report.home}`,
   );
   logger.log?.(`  刷新   每 ${Math.round(intervalMs / 1000)} 秒（浏览器拉取 /api/fragment）`);
-  logger.log?.(`  会话   ${current.report.summary.sessions} 个 · ${formatCny(current.report.summary.costCny)} · ${formatTokens(current.report.summary.totalTokens)} tokens`);
+  logger.log?.(`  会话   ${current.report.summary.sessions} 个 · ${formatMoney(current.report.summary.costMicroCny, current.report.summary.costMicroUsd)} · ${formatTokens(current.report.summary.totalTokens)} tokens`);
   logger.log?.('  停止   Ctrl+C');
   if (open) openBrowser(url);
 

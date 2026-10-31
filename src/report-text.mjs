@@ -1,5 +1,6 @@
 /** Human-readable terminal reports. */
 import { activityLabel } from './activity.mjs';
+import { formatMoney } from './money.mjs';
 import { billedInputTokens, describePeakHours, formatCny, formatTokens } from './pricing.mjs';
 import { formatPercent, formatTime, renderTable, truncateDisplay } from './format.mjs';
 
@@ -16,7 +17,7 @@ function modelsLabel(analysis) {
 /** Summary table over analyzed sessions. */
 export function renderList(results, { pricing, home, sources = [], generatedAt }) {
   const lines = [];
-  const priced = results.filter((result) => result.analysis.totals.costMicroCny > 0);
+  const priced = results.filter((result) => (result.analysis.totals.costMicroCny ?? 0) > 0 || (result.analysis.totals.costMicroUsd ?? 0) > 0);
   const multiSource = Array.isArray(sources) && sources.length > 1;
   lines.push(`DSH 会话费用  ·  ${pricing.currency}  ·  ${pricing.unitTokens.toLocaleString('en-US')} tokens 计价`);
   if (multiSource) {
@@ -33,7 +34,10 @@ export function renderList(results, { pricing, home, sources = [], generatedAt }
   const rows = results.map((result) => {
     const { meta, analysis } = result;
     const unpricedMark = analysis.unpricedModels.length > 0 ? ' *' : '';
-    const costCell = analysis.totals.costMicroCny > 0 ? formatCny(analysis.totals.costCny) : '—';
+    const costCell =
+    (analysis.totals.costMicroCny ?? 0) > 0 || (analysis.totals.costMicroUsd ?? 0) > 0
+      ? formatMoney(analysis.totals.costMicroCny, analysis.totals.costMicroUsd)
+      : '—';
     // Running rows are already sorted first; the marker explains why a cheaper
     // session can appear above an expensive completed one.
     const runningMark = meta.running === true ? (meta.isSubagent === true ? '●子 ' : '● ') : '';
@@ -72,14 +76,15 @@ export function renderList(results, { pricing, home, sources = [], generatedAt }
       acc.output += buckets.outputTokens;
       acc.cacheWrite += buckets.cacheWriteTokens;
       acc.cacheRead += buckets.cacheReadTokens;
-      acc.cost += result.analysis.totals.costCny;
+      acc.costCny += result.analysis.totals.costCny;
+      acc.costUsd += result.analysis.totals.costUsd ?? 0;
       return acc;
     },
-    { input: 0, output: 0, cacheWrite: 0, cacheRead: 0, cost: 0 },
+    { input: 0, output: 0, cacheWrite: 0, cacheRead: 0, costCny: 0, costUsd: 0 },
   );
   lines.push('');
   lines.push(
-    `合计  in ${formatTokens(totals.input)}  ·  out ${formatTokens(totals.output)}  ·  cacheW ${formatTokens(totals.cacheWrite)}  ·  cacheR ${formatTokens(totals.cacheRead)}  ·  ${formatCny(totals.cost)}`,
+    `合计  in ${formatTokens(totals.input)}  ·  out ${formatTokens(totals.output)}  ·  cacheW ${formatTokens(totals.cacheWrite)}  ·  cacheR ${formatTokens(totals.cacheRead)}  ·  ${formatMoney(Math.round(totals.costCny * 1e6), Math.round(totals.costUsd * 1e6))}`,
   );
   const unpriced = [...new Set(results.flatMap((result) => result.analysis.unpricedModels))];
   if (unpriced.length > 0) lines.push(`* 未配置价格的模型（仅计 token，不计费用）：${unpriced.join(', ')}`);
@@ -99,7 +104,7 @@ export function renderDetail(result, { pricing, steps = false }) {
   lines.push(`日志  ${meta.logPath}`);
   lines.push('');
   lines.push(
-    `费用  ${formatCny(analysis.totals.costCny)}   ·   Token ${formatTokens(analysis.totals.totalTokens)}   ·   缓存命中 ${formatPercent(analysis.totals.cacheHit)}   ·   计费采样 ${analysis.totals.samples} 次`,
+    `费用  ${formatMoney(analysis.totals.costMicroCny, analysis.totals.costMicroUsd)}   ·   Token ${formatTokens(analysis.totals.totalTokens)}   ·   缓存命中 ${formatPercent(analysis.totals.cacheHit)}   ·   计费采样 ${analysis.totals.samples} 次`,
   );
 
   if (analysis.byModel.length > 0) {
@@ -112,7 +117,7 @@ export function renderDetail(result, { pricing, steps = false }) {
       formatTokens(entry.tokens.outputTokens),
       formatTokens(entry.tokens.cacheWriteTokens),
       formatTokens(entry.tokens.cacheReadTokens),
-      entry.priced ? formatCny(entry.costCny) : '—',
+      entry.priced ? formatMoney(entry.costMicroCny, entry.costMicroUsd) : '—',
       formatPercent(entry.share),
     ]);
     lines.push(
@@ -134,7 +139,7 @@ export function renderDetail(result, { pricing, steps = false }) {
       formatTokens(entry.tokens.outputTokens),
       formatTokens(entry.tokens.cacheWriteTokens),
       formatTokens(entry.tokens.cacheReadTokens),
-      formatCny(entry.costCny),
+      formatMoney(entry.costMicroCny, entry.costMicroUsd),
     ]);
     lines.push(renderTable(['TURN', 'STEPS', 'INPUT', 'OUTPUT', 'CACHE-W', 'CACHE-R', 'COST'], rows, ['r', 'r', 'r', 'r', 'r', 'r', 'r']));
   }
@@ -150,7 +155,7 @@ export function renderDetail(result, { pricing, steps = false }) {
       formatTokens(record.buckets.outputTokens),
       formatTokens(record.buckets.cacheWriteTokens),
       formatTokens(record.buckets.cacheReadTokens),
-      record.priced ? formatCny(record.costMicroCny / 1e6) : '—',
+      record.priced ? formatMoney(record.costMicroCny, record.costMicroUsd) : '—',
     ]);
     lines.push(
       renderTable(

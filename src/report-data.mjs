@@ -1,6 +1,7 @@
 /** Machine-readable report builders: JSON and CSV. */
 import { isSubagentSession, projectionIsRunning, sortSessionRecords } from './activity.mjs';
 import { resolvePrice } from './pricing.mjs';
+import { sortCostMicro } from './money.mjs';
 import { formatDay, localMidnight } from './time-range.mjs';
 
 /** Round a float for stable JSON output. */
@@ -36,6 +37,8 @@ export function sessionRecord({ meta, analysis, projection }) {
       totalTokens: analysis.totals.totalTokens,
       costCny: round(analysis.totals.costCny),
       costMicroCny: analysis.totals.costMicroCny,
+      costUsd: round(analysis.totals.costUsd ?? 0),
+      costMicroUsd: analysis.totals.costMicroUsd ?? 0,
       cacheHit: analysis.totals.cacheHit === null ? null : round(analysis.totals.cacheHit, 4),
       samples: analysis.totals.samples,
     },
@@ -47,6 +50,8 @@ export function sessionRecord({ meta, analysis, projection }) {
       tokens: { ...entry.tokens },
       costCny: round(entry.costCny),
       costMicroCny: entry.costMicroCny,
+      costUsd: round(entry.costUsd ?? 0),
+      costMicroUsd: entry.costMicroUsd ?? 0,
       share: round(entry.share, 4),
       samples: entry.samples,
     })),
@@ -57,6 +62,8 @@ export function sessionRecord({ meta, analysis, projection }) {
       totalTokens: entry.totalTokens,
       costCny: round(entry.costCny),
       costMicroCny: entry.costMicroCny,
+      costUsd: round(entry.costUsd ?? 0),
+      costMicroUsd: entry.costMicroUsd ?? 0,
       cacheHit: entry.cacheHit === null ? null : round(entry.cacheHit, 4),
     })),
     unpricedModels: analysis.unpricedModels,
@@ -108,7 +115,7 @@ export function buildDailyReport(results, pricing) {
         day: dayStart > 0 ? formatDay(dayStart) : 'unknown',
         dayStart,
         unknown: dayStart <= 0,
-        totals: { ...emptyTokens(), totalTokens: 0, costMicroCny: 0, cacheSavingMicro: 0, samples: 0, cacheHit: null },
+        totals: { ...emptyTokens(), totalTokens: 0, costMicroCny: 0, costMicroUsd: 0, cacheSavingMicro: 0, samples: 0, cacheHit: null },
         sessions: new Map(),
       };
       days.set(dayStart, entry);
@@ -131,6 +138,7 @@ export function buildDailyReport(results, pricing) {
       day.totals.cacheReadTokens += buckets.cacheReadTokens;
       day.totals.totalTokens += total;
       day.totals.costMicroCny += record.costMicroCny ?? 0;
+      day.totals.costMicroUsd += record.costMicroUsd ?? 0;
       day.totals.samples += 1;
 
       let session = day.sessions.get(`${meta.source ?? ''}\u0000${meta.id}`);
@@ -143,6 +151,7 @@ export function buildDailyReport(results, pricing) {
           running: meta.running === true,
           isSubagent: meta.isSubagent === true,
           costMicroCny: 0,
+          costMicroUsd: 0,
           samples: 0,
           tokens: emptyTokens(),
           models: new Map(),
@@ -150,6 +159,7 @@ export function buildDailyReport(results, pricing) {
         day.sessions.set(meta.id, session);
       }
       session.costMicroCny += record.costMicroCny ?? 0;
+      session.costMicroUsd += record.costMicroUsd ?? 0;
       session.samples += 1;
       session.tokens.uncachedInputTokens += buckets.uncachedInputTokens;
       session.tokens.outputTokens += buckets.outputTokens;
@@ -164,12 +174,14 @@ export function buildDailyReport(results, pricing) {
           model: record.model ?? null,
           priced: record.priced === true,
           costMicroCny: 0,
+          costMicroUsd: 0,
           cacheSavingMicro: 0,
           tokens: emptyTokens(),
         };
         session.models.set(modelKey, model);
       }
       model.costMicroCny += record.costMicroCny ?? 0;
+      model.costMicroUsd += record.costMicroUsd ?? 0;
       model.tokens.uncachedInputTokens += buckets.uncachedInputTokens;
       model.tokens.outputTokens += buckets.outputTokens;
       model.tokens.cacheWriteTokens += buckets.cacheWriteTokens;
@@ -197,6 +209,7 @@ export function buildDailyReport(results, pricing) {
         running: session.running,
         isSubagent: session.isSubagent,
         costMicroCny: session.costMicroCny,
+        costMicroUsd: session.costMicroUsd,
         samples: session.samples,
         tokens: { ...session.tokens, totalTokens: tokensTotal(session.tokens) },
         models: [...session.models.values()]
@@ -205,12 +218,13 @@ export function buildDailyReport(results, pricing) {
             model: model.model,
             priced: model.priced,
             costMicroCny: model.costMicroCny,
+            costMicroUsd: model.costMicroUsd,
             cacheSavingMicro: model.cacheSavingMicro,
             tokens: { ...model.tokens, totalTokens: tokensTotal(model.tokens) },
           }))
-          .sort((a, b) => b.costMicroCny - a.costMicroCny),
+          .sort((a, b) => sortCostMicro(b) - sortCostMicro(a)),
       }))
-      .sort((a, b) => b.costMicroCny - a.costMicroCny || String(a.title ?? '').localeCompare(String(b.title ?? '')));
+      .sort((a, b) => sortCostMicro(b) - sortCostMicro(a) || String(a.title ?? '').localeCompare(String(b.title ?? '')));
 
     let cacheSavingMicro = 0;
     for (const session of sessions) {
@@ -307,6 +321,7 @@ export function buildTimeRangeDataset({ sessions, pricing, pageSize = 5, daily }
         running: session.running === true,
         isSubagent: session.isSubagent === true,
         costMicroCny: session.costMicroCny,
+        costMicroUsd: session.costMicroUsd ?? 0,
         samples: session.samples,
         tokens: { ...session.tokens },
         models: session.models.map((model) => ({
@@ -314,6 +329,7 @@ export function buildTimeRangeDataset({ sessions, pricing, pageSize = 5, daily }
           model: model.model ?? null,
           priced: model.priced === true,
           costMicroCny: model.costMicroCny,
+          costMicroUsd: model.costMicroUsd ?? 0,
           cacheSavingMicro: model.cacheSavingMicro,
           tokens: { ...model.tokens },
         })),
@@ -338,7 +354,8 @@ export function buildReport({ home, sources = [], pricing, results, generatedAt 
       acc.cacheReadTokens += session.totals.cacheReadTokens;
       acc.totalTokens += session.totals.totalTokens;
       acc.costMicroCny += session.totals.costMicroCny;
-      if (session.totals.costMicroCny > 0) acc.pricedSessions += 1;
+      acc.costMicroUsd += session.totals.costMicroUsd;
+      if (session.totals.costMicroCny > 0 || session.totals.costMicroUsd > 0) acc.pricedSessions += 1;
       return acc;
     },
     {
@@ -350,6 +367,7 @@ export function buildReport({ home, sources = [], pricing, results, generatedAt 
       cacheReadTokens: 0,
       totalTokens: 0,
       costMicroCny: 0,
+      costMicroUsd: 0,
     },
   );
   const billedInput = summary.inputTokens + summary.cacheWriteTokens + summary.cacheReadTokens;
@@ -360,6 +378,7 @@ export function buildReport({ home, sources = [], pricing, results, generatedAt 
     generatedAtISO: new Date(generatedAt).toISOString(),
     home,
     currency: pricing.currency,
+    currencies: ['CNY', 'USD'],
     unitTokens: pricing.unitTokens,
     pricing: {
       models: Object.fromEntries(Object.entries(pricing.models).map(([id, price]) => [id, { ...price }])),
@@ -368,6 +387,7 @@ export function buildReport({ home, sources = [], pricing, results, generatedAt 
     summary: {
       ...summary,
       costCny: round(summary.costMicroCny / 1e6),
+      costUsd: round(summary.costMicroUsd / 1e6),
       cacheHit: billedInput === 0 ? null : round(summary.cacheReadTokens / billedInput, 4),
       unpricedModels: [...new Set(sessions.flatMap((session) => session.unpricedModels))],
     },
@@ -404,6 +424,7 @@ export function toCsv(report) {
     'cache_write_tokens',
     'cache_read_tokens',
     'cost_cny',
+    'cost_usd',
   ];
   const rows = [header];
   for (const session of report.sessions) {
@@ -417,6 +438,7 @@ export function toCsv(report) {
         '',
         '',
         'false',
+        0,
         0,
         0,
         0,
@@ -440,6 +462,7 @@ export function toCsv(report) {
         model.tokens.cacheWriteTokens,
         model.tokens.cacheReadTokens,
         model.costCny.toFixed(6),
+        (model.costUsd ?? 0).toFixed(6),
       ]);
     }
   }
@@ -457,6 +480,7 @@ export function toCsv(report) {
     report.summary.cacheWriteTokens,
     report.summary.cacheReadTokens,
     report.summary.costCny.toFixed(6),
+    report.summary.costUsd.toFixed(6),
   ]);
   return rows.map((row) => row.map(csvField).join(',')).join('\r\n') + '\r\n';
 }

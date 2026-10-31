@@ -153,7 +153,8 @@ node bin/dsh-cost-live.mjs --host 0.0.0.0                 # 局域网访问（�
 - **按会话覆盖**：某个会话存在官方记录、且本地模型全属 `opencode*` 时，token 与费用改用官方值
   （`priceKey = opencode-official`，费用 = `cost(USD) × fxUsdCny`）；混用其它供应商的会话保持本地口径，
   不会被半截覆盖。页面顶部会显示「官方用量：N 个会话…」。
-- **配置** `config/official.json`：`store`（归档目录）、`fxUsdCny`（汇率，默认 7.1）、`providers`、
+- **两套货币，互不折算**：官方费用保留 USD（`costMicroUsd`），本地价表仍是 CNY；会话、模型、每日、总计都同时带两列，显示成 `¥x + $y`，合计也只相加同币种。仅排序时用一个固定常数把两者放在同一队列（`SORT_USD_TO_CNY`，不参与任何求和）。
+- **配置** `config/official.json`：`store`（归档目录）、`providers`、
   `credentials`（默认读 `~/.dsh/.credentials.yaml` 的 `OPENCODE_GO_API_KEY`，同名环境变量优先）。
 
 ```powershell

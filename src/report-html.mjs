@@ -1,5 +1,6 @@
 /** Self-contained HTML report. */
 import { activityLabel, sortSessionRecords } from './activity.mjs';
+import { formatMoney, sortCostMicro } from './money.mjs';
 import { describePeakHours, formatCny, formatTokens } from './pricing.mjs';
 import { formatPercent, formatTime } from './format.mjs';
 import { buildTimeRangeDataset, modelCacheSavingMicro } from './report-data.mjs';
@@ -20,6 +21,11 @@ function cny(micro) {
   return formatCny(micro / 1e6);
 }
 
+/** CNY and/or USD, never converted into each other. */
+function money(cnyMicro, usdMicro) {
+  return formatMoney(cnyMicro, usdMicro);
+}
+
 /** Aggregate per-model totals across all sessions. */
 function aggregateModels(sessions, pricing) {
   const map = new Map();
@@ -35,6 +41,7 @@ function aggregateModels(sessions, pricing) {
           priced: model.priced,
           tokens: { uncachedInputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 },
           costMicroCny: 0,
+          costMicroUsd: 0,
           cacheSavingMicro: 0,
           sessions: new Set(),
         };
@@ -45,12 +52,13 @@ function aggregateModels(sessions, pricing) {
       entry.tokens.cacheReadTokens += model.tokens.cacheReadTokens;
       entry.tokens.cacheWriteTokens += model.tokens.cacheWriteTokens;
       entry.costMicroCny += model.costMicroCny;
+      entry.costMicroUsd += model.costMicroUsd ?? 0;
       // Rounded per model so the browser's integer sums reproduce this total.
       entry.cacheSavingMicro += Math.round(modelCacheSavingMicro(model, pricing));
       entry.sessions.add(session.id);
     }
   }
-  return [...map.values()].sort((a, b) => b.costMicroCny - a.costMicroCny);
+  return [...map.values()].sort((a, b) => sortCostMicro(b) - sortCostMicro(a));
 }
 
 /** Render a bar whose width is relative to `max`. */
@@ -68,9 +76,9 @@ export function renderHtml(report) {
   const sessions = sortSessionRecords([...report.sessions]);
   const hiddenCount = Math.max(0, sessions.length - SESSION_PAGE_SIZE);
   const runningCount = sessions.filter((session) => session.running === true).length;
-  const maxCost = Math.max(0, ...sessions.map((session) => session.totals.costMicroCny));
+  const maxCost = Math.max(0, ...sessions.map((session) => sortCostMicro(session.totals)));
   const dailyDays = Array.isArray(report.daily?.days) ? report.daily.days : [];
-  const maxDayCost = Math.max(0, ...dailyDays.map((day) => day.totals.costMicroCny));
+  const maxDayCost = Math.max(0, ...dailyDays.map((day) => sortCostMicro(day.totals)));
   const todayKey = formatDay(report.generatedAt);
   const sources = Array.isArray(report.sources) ? report.sources : [];
   const multiSource = sources.length > 1;
@@ -125,7 +133,7 @@ export function renderHtml(report) {
         <td class="num">${formatTokens(model.tokens.outputTokens)}</td>
         <td class="num">${formatTokens(model.tokens.cacheWriteTokens)}</td>
         <td class="num">${formatTokens(model.tokens.cacheReadTokens)}</td>
-        <td class="num strong">${model.priced ? cny(model.costMicroCny) : '未定价'}</td>
+        <td class="num strong">${model.priced ? money(model.costMicroCny, model.costMicroUsd) : '未定价'}</td>
         <td class="num muted">${model.sessions.size}</td>
       </tr>`,
     )
@@ -161,7 +169,7 @@ export function renderHtml(report) {
             <td class="num">${formatTokens(model.tokens.outputTokens)}</td>
             <td class="num">${formatTokens(model.tokens.cacheWriteTokens)}</td>
             <td class="num">${formatTokens(model.tokens.cacheReadTokens)}</td>
-            <td class="num strong">${model.priced ? cny(model.costMicroCny) : '未定价'}</td>
+            <td class="num strong">${model.priced ? money(model.costMicroCny, model.costMicroUsd) : '未定价'}</td>
             <td class="num muted">${formatPercent(model.share)}</td>
           </tr>`,
         )
@@ -176,8 +184,8 @@ export function renderHtml(report) {
           <td>${modelChips || '<span class="muted">—</span>'}</td>
           <td class="num">${formatTokens(session.totals.totalTokens)}</td>
           <td class="cost-cell">
-            <span class="strong">${session.totals.costMicroCny > 0 ? cny(session.totals.costMicroCny) : '<span class="muted">—</span>'}</span>
-            ${bar(session.totals.costMicroCny, maxCost)}
+            <span class="strong">${session.totals.costMicroCny > 0 || session.totals.costMicroUsd > 0 ? money(session.totals.costMicroCny, session.totals.costMicroUsd) : '<span class="muted">—</span>'}</span>
+            ${bar(sortCostMicro(session.totals), maxCost)}
           </td>
         </tr>
         <tr class="${detailClass}" id="${target}" data-session="${escapeHtml(session.uid ?? session.id)}" data-created-at="${session.createdAt ?? ''}"${hiddenAttr}>
@@ -218,7 +226,7 @@ export function renderHtml(report) {
             <td>${chips || '<span class="muted">—</span>'}</td>
             <td class="num">${formatTokens(session.tokens.totalTokens)}</td>
             <td class="num muted">${session.samples}</td>
-            <td class="num strong">${session.costMicroCny > 0 ? cny(session.costMicroCny) : '<span class="muted">—</span>'}</td>
+            <td class="num strong">${session.costMicroCny > 0 || session.costMicroUsd > 0 ? money(session.costMicroCny, session.costMicroUsd) : '<span class="muted">—</span>'}</td>
           </tr>`;
         })
         .join('');
@@ -228,8 +236,8 @@ export function renderHtml(report) {
           <td class="num">${formatTokens(day.totals.totalTokens)}</td>
           <td class="num">${formatPercent(day.totals.cacheHit)}</td>
           <td class="cost-cell">
-            <span class="strong">${day.totals.costMicroCny > 0 ? cny(day.totals.costMicroCny) : '<span class="muted">—</span>'}</span>
-            ${bar(day.totals.costMicroCny, maxDayCost)}
+            <span class="strong">${day.totals.costMicroCny > 0 || day.totals.costMicroUsd > 0 ? money(day.totals.costMicroCny, day.totals.costMicroUsd) : '<span class="muted">—</span>'}</span>
+            ${bar(sortCostMicro(day.totals), maxDayCost)}
           </td>
         </tr>
         <tr class="detail" id="${target}" data-day-start="${day.dayStart}" hidden>
@@ -255,7 +263,7 @@ export function renderHtml(report) {
   const official = report.official ?? null;
   const officialNote =
     official !== null && official.sessions > 0
-      ? `<div class="note">官方用量：${official.sessions} 个会话的 token 与费用取自 OpenCode 控制台日志（${official.requests} 条请求，1 USD = ${official.fxUsdCny} CNY），本地归档仅作备份。</div>`
+      ? `<div class="note">官方用量：${official.sessions} 个会话的 token 与费用取自 OpenCode 控制台日志（${official.requests} 条请求，按 USD 计费，不折算），本地归档仅作备份。</div>`
       : '';
   const sourceErrorNote =
     sourceErrors.length > 0
@@ -444,7 +452,7 @@ export function renderHtml(report) {
   <div class="cards">
     <div class="card money">
       <div class="k">总费用</div>
-      <div class="v" id="stat-cost">${formatCny(summary.costCny)}</div>
+      <div class="v" id="stat-cost">${money(summary.costMicroCny, summary.costMicroUsd)}</div>
       <div class="f" id="stat-cost-note">${pricedCount} / ${summary.sessions} 个会话产生费用</div>
     </div>
     <div class="card">

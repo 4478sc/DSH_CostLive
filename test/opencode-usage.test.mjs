@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { buildReport } from '../src/report-data.mjs';
 import {
   applyOfficialOverlay,
   groupBySession,
@@ -62,18 +63,19 @@ test('groupBySession normalizes ids and skips rows without a session', () => {
   assert.equal(grouped.get('abc').length, 2);
 });
 
-test('officialAnalysis mirrors the engine shape and converts USD to CNY', () => {
+test('officialAnalysis mirrors the engine shape and keeps costs in USD', () => {
   const rows = [
     normalizeLogItem(raw({ id: '1', cost: 0.01, inputTokens: 10, outputTokens: 20, cacheReadTokens: 30 })),
     normalizeLogItem(raw({ id: '2', cost: 0.02, inputTokens: 5, outputTokens: 1, cacheReadTokens: 0, model: 'other' })),
     normalizeLogItem(raw({ id: '3', cost: 1, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0 })),
   ];
-  const analysis = officialAnalysis(rows, { fxUsdCny: 7 });
+  const analysis = officialAnalysis(rows);
   assert.equal(analysis.totals.samples, 2);
   assert.equal(analysis.totals.tokens.uncachedInputTokens, 15);
   assert.equal(analysis.totals.tokens.outputTokens, 21);
   assert.equal(analysis.totals.tokens.cacheReadTokens, 30);
-  assert.equal(analysis.totals.costMicroCny, Math.round(0.03 * 7 * 1e6));
+  assert.equal(analysis.totals.costMicroCny, 0);
+  assert.equal(analysis.totals.costMicroUsd, Math.round(0.03 * 1e6));
   assert.equal(analysis.byModel.length, 2);
   assert.ok(Math.abs(analysis.byModel.reduce((sum, m) => sum + m.share, 0) - 1) < 1e-9);
   assert.equal(analysis.records[0].official, true);
@@ -99,11 +101,12 @@ test('applyOfficialOverlay replaces opencode sessions, skips mixed ones', () => 
     { meta: { id: 'session-mixed' }, analysis: mixed },
     { meta: { id: 'session-none' }, analysis: local },
   ];
-  const stats = applyOfficialOverlay(results, { records: rows, fxUsdCny: 7 });
+  const stats = applyOfficialOverlay(results, { records: rows });
   assert.equal(stats.applied, 1);
   assert.equal(stats.skippedMixed, 1);
   assert.equal(results[0].meta.official, true);
-  assert.equal(results[0].analysis.totals.costMicroCny, Math.round(0.5 * 7 * 1e6));
+  assert.equal(results[0].analysis.totals.costMicroUsd, Math.round(0.5 * 1e6));
+  assert.equal(results[0].analysis.totals.costMicroCny, 0);
   assert.equal(results[0].localAnalysis, local);
   assert.equal(results[1].analysis, mixed);
   assert.equal(results[2].analysis, local);
@@ -118,4 +121,42 @@ test('summarizeStore reports counts, span and cost', () => {
   assert.equal(summary.newest, 200);
   assert.equal(summary.costUsd, 0.75);
   assert.equal(recordTokens(rows[1]), 6200);
+});
+
+test('buildReport keeps CNY and USD totals apart instead of converting', () => {
+  const pricing = { currency: 'CNY', unitTokens: 1_000_000, models: {}, aliases: {} };
+  const buckets = { uncachedInputTokens: 10, outputTokens: 5, cacheWriteTokens: 0, cacheReadTokens: 100 };
+  const localAnalysis = {
+    records: [{ time: 1793400000000, provider: 'opencode-go', model: 'deepseek-v4.1-flash', priced: true, buckets, costMicroCny: 1_000_000, costMicroUsd: 0 }],
+    totals: { tokens: { ...buckets }, totalTokens: 115, costMicroCny: 1_000_000, costCny: 1, costMicroUsd: 0, costUsd: 0, cacheHit: 0.9, samples: 1 },
+    byModel: [{ provider: 'opencode-go', model: 'deepseek-v4.1-flash', priceKey: 'deepseek-v4.1-flash', priced: true, tokens: { ...buckets }, costMicroCny: 1_000_000, costCny: 1, costMicroUsd: 0, costUsd: 0, share: 1, samples: 1 }],
+    byTurn: [],
+    unpricedModels: [],
+  };
+  const officialAnalysis = {
+    records: [{ time: 1793400100000, provider: 'opencode', model: 'deepseek-v4.1-flash', priced: true, buckets, costMicroCny: 0, costMicroUsd: 2_500_000 }],
+    totals: { tokens: { ...buckets }, totalTokens: 115, costMicroCny: 0, costCny: 0, costMicroUsd: 2_500_000, costUsd: 2.5, cacheHit: 0.9, samples: 1 },
+    byModel: [{ provider: 'opencode', model: 'deepseek-v4.1-flash', priceKey: 'opencode-official', priced: true, tokens: { ...buckets }, costMicroCny: 0, costCny: 0, costMicroUsd: 2_500_000, costUsd: 2.5, share: 1, samples: 1 }],
+    byTurn: [],
+    unpricedModels: [],
+  };
+  const report = buildReport({
+    home: 'test',
+    sources: [],
+    pricing,
+    results: [
+      { meta: { id: 'local-1', title: 'local', createdAt: 1793400000000, source: '主机' }, analysis: localAnalysis },
+      { meta: { id: 'official-1', title: 'official', createdAt: 1793400100000, source: '主机', official: true }, analysis: officialAnalysis },
+    ],
+    generatedAt: 1793400200000,
+  });
+  assert.equal(report.summary.costMicroCny, 1_000_000);
+  assert.equal(report.summary.costMicroUsd, 2_500_000);
+  assert.equal(report.summary.costCny, 1);
+  assert.equal(report.summary.costUsd, 2.5);
+  assert.equal(report.sessions.find((s) => s.id === 'official-1').official, true);
+  assert.equal(report.sessions.find((s) => s.id === 'local-1').official, false);
+  const day = report.daily.days.find((d) => d.day === '2026-10-31');
+  assert.equal(day.totals.costMicroCny, 1_000_000);
+  assert.equal(day.totals.costMicroUsd, 2_500_000);
 });

@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { sortSessionResults } from './activity.mjs';
 import { analyzeEvents } from './engine.mjs';
+import { formatMoney } from './money.mjs';
 import { loadPricing, formatCny } from './pricing.mjs';
 import { buildReport, toCsv } from './report-data.mjs';
 import { renderHtml } from './report-html.mjs';
@@ -290,12 +291,10 @@ export function main(argv = process.argv.slice(2)) {
       if (officialReport !== null) {
         const stats = applyOfficialOverlay(results, {
           records: officialReport.records,
-          fxUsdCny: officialReport.config.fxUsdCny,
           providers: officialReport.config.providers,
         });
         official = {
           store: officialReport.config.store,
-          fxUsdCny: officialReport.config.fxUsdCny,
           requests: officialReport.summary.requests,
           sessions: stats.applied,
           skippedMixed: stats.skippedMixed,
@@ -347,7 +346,7 @@ export function main(argv = process.argv.slice(2)) {
     const report = attachOfficial(buildReport({ home, sources: sourceStats, pricing, results, generatedAt }));
     const target = writeOut(options.out ?? 'dsh-cost-report.html', renderHtml(report));
     process.stdout.write(`HTML 报告已生成: ${target}\n`);
-    process.stdout.write(`会话 ${report.summary.sessions} 个 · 总费用 ${formatCny(report.summary.costCny)} · Token ${report.summary.totalTokens.toLocaleString('en-US')}\n`);
+    process.stdout.write(`会话 ${report.summary.sessions} 个 · 总费用 ${formatMoney(report.summary.costMicroCny, report.summary.costMicroUsd)} · Token ${report.summary.totalTokens.toLocaleString('en-US')}\n`);
     return 0;
   }
 
@@ -358,7 +357,7 @@ export function main(argv = process.argv.slice(2)) {
   }
   process.stdout.write(`${renderList(results, { pricing, home, sources: sourceStats, generatedAt })}\n`);
   if (official !== null) {
-    process.stdout.write(`官方用量  ${official.sessions} 个会话取自 OpenCode 控制台日志 · ${official.requests} 条请求 · 1 USD = ${official.fxUsdCny} CNY\n`);
+    process.stdout.write(`官方用量  ${official.sessions} 个会话取自 OpenCode 控制台日志（USD 计费） · ${official.requests} 条请求\n`);
   }
   if (options.verify === true) {
     const checked = results.map((result) => ({ result, verification: verifyProjection(result) })).filter((entry) => entry.verification !== null);

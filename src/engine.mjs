@@ -113,6 +113,7 @@ export function analyzeEvents(events, pricing) {
           // `event.time` selects the tier: two-tier models (DeepSeek) bill
           // off-peak samples at the discounted rate of the sample's own clock.
           costMicroCny: resolved === null ? 0 : costMicroCny(buckets, resolved.price, event.time),
+          costMicroUsd: 0,
         };
         if (!resolved && active.model) warnings.push(`no price for model "${active.model}" (provider ${active.provider ?? 'unknown'})`);
         if (last !== null && last.turn === turn && last.step === step) {
@@ -146,20 +147,23 @@ export function analyzeEvents(events, pricing) {
         priced: record.priced,
         tokens: zeroBuckets(),
         costMicroCny: 0,
+        costMicroUsd: 0,
         samples: 0,
       };
       models.set(modelKey, modelEntry);
     }
     addBuckets(modelEntry.tokens, record.buckets);
     modelEntry.costMicroCny += record.costMicroCny;
+    modelEntry.costMicroUsd += record.costMicroUsd ?? 0;
     modelEntry.samples += 1;
     let turnEntry = turns.get(record.turn);
     if (turnEntry === undefined) {
-      turnEntry = { turn: record.turn, tokens: zeroBuckets(), costMicroCny: 0, steps: 0 };
+      turnEntry = { turn: record.turn, tokens: zeroBuckets(), costMicroCny: 0, costMicroUsd: 0, steps: 0 };
       turns.set(record.turn, turnEntry);
     }
     addBuckets(turnEntry.tokens, record.buckets);
     turnEntry.costMicroCny += record.costMicroCny;
+    turnEntry.costMicroUsd += record.costMicroUsd ?? 0;
     turnEntry.steps += 1;
   }
 
@@ -167,6 +171,7 @@ export function analyzeEvents(events, pricing) {
     .map((entry) => ({
       ...entry,
       costCny: entry.costMicroCny / 1e6,
+      costUsd: 0,
       share: totalMicro === 0 ? 0 : entry.costMicroCny / totalMicro,
     }))
     .sort((a, b) => b.costMicroCny - a.costMicroCny || totalTokens(b.tokens) - totalTokens(a.tokens));
@@ -175,6 +180,7 @@ export function analyzeEvents(events, pricing) {
     .map((entry) => ({
       ...entry,
       costCny: entry.costMicroCny / 1e6,
+      costUsd: 0,
       totalTokens: totalTokens(entry.tokens),
       cacheHit: billedInputTokens(entry.tokens) === 0 ? null : entry.tokens.cacheReadTokens / billedInputTokens(entry.tokens),
     }))
@@ -189,6 +195,8 @@ export function analyzeEvents(events, pricing) {
       totalTokens: totalTokens(totalsBuckets),
       costMicroCny: totalMicro,
       costCny: totalMicro / 1e6,
+      costMicroUsd: 0,
+      costUsd: 0,
       billedInputTokens: billedInputTokens(totalsBuckets),
       cacheHit: billedInputTokens(totalsBuckets) === 0 ? null : totalsBuckets.cacheReadTokens / billedInputTokens(totalsBuckets),
       samples: billed.length,

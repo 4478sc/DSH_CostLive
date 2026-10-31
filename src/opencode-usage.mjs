@@ -99,18 +99,18 @@ export function recordTokens(record) {
 
 /**
  * Build the same analysis object `analyzeEvents` returns, from official rows.
- * `fxUsdCny` turns the console's USD cost into the dashboard currency.
+ * Costs stay in USD (\`costMicroUsd\`); nothing is converted to CNY here.
  */
-export function officialAnalysis(records, { fxUsdCny = 7.1 } = {}) {
+export function officialAnalysis(records) {
   const billed = (records ?? []).filter((record) => recordTokens(record) > 0);
   const totalsBuckets = zeroBuckets();
   const models = new Map();
-  let totalMicro = 0;
+  let totalMicroUsd = 0;
 
   for (const record of billed) {
-    const costMicroCny = Math.round(record.costUsd * fxUsdCny * 1e6);
+    const costMicroUsd = Math.round(record.costUsd * 1e6);
     addBuckets(totalsBuckets, record.tokens);
-    totalMicro += costMicroCny;
+    totalMicroUsd += costMicroUsd;
     const key = `${record.provider ?? '?'}\u0000${record.model ?? '?'}`;
     let model = models.get(key);
     if (model === undefined) {
@@ -121,31 +121,34 @@ export function officialAnalysis(records, { fxUsdCny = 7.1 } = {}) {
         priced: true,
         tokens: zeroBuckets(),
         costMicroCny: 0,
+        costMicroUsd: 0,
         samples: 0,
       };
       models.set(key, model);
     }
     addBuckets(model.tokens, record.tokens);
-    model.costMicroCny += costMicroCny;
+    model.costMicroUsd += costMicroUsd;
     model.samples += 1;
   }
 
   const byModel = [...models.values()]
     .map((entry) => ({
       ...entry,
-      costCny: entry.costMicroCny / 1e6,
-      share: totalMicro === 0 ? 0 : entry.costMicroCny / totalMicro,
+      costCny: 0,
+      costUsd: entry.costMicroUsd / 1e6,
+      share: totalMicroUsd === 0 ? 0 : entry.costMicroUsd / totalMicroUsd,
     }))
-    .sort((a, b) => b.costMicroCny - a.costMicroCny);
+    .sort((a, b) => b.costMicroUsd - a.costMicroUsd);
 
   const recordsOut = billed.map((record) => ({
     time: record.startedAt,
     provider: record.provider,
     model: record.model,
-    priceKey: null,
+    priceKey: 'opencode-official',
     priced: true,
     buckets: { ...record.tokens },
-    costMicroCny: Math.round(record.costUsd * fxUsdCny * 1e6),
+    costMicroCny: 0,
+    costMicroUsd: Math.round(record.costUsd * 1e6),
     official: true,
   }));
 
@@ -154,8 +157,10 @@ export function officialAnalysis(records, { fxUsdCny = 7.1 } = {}) {
     totals: {
       tokens: totalsBuckets,
       totalTokens: totalsBuckets.uncachedInputTokens + totalsBuckets.outputTokens + totalsBuckets.cacheReadTokens + totalsBuckets.cacheWriteTokens,
-      costMicroCny: totalMicro,
-      costCny: totalMicro / 1e6,
+      costMicroCny: 0,
+      costCny: 0,
+      costMicroUsd: totalMicroUsd,
+      costUsd: totalMicroUsd / 1e6,
       billedInputTokens: billedInputTokens(totalsBuckets),
       cacheHit:
         billedInputTokens(totalsBuckets) === 0 ? null : totalsBuckets.cacheReadTokens / billedInputTokens(totalsBuckets),
@@ -165,7 +170,7 @@ export function officialAnalysis(records, { fxUsdCny = 7.1 } = {}) {
     byTurn: [],
     unpricedModels: [],
     warnings: [],
-    official: { requests: recordsOut.length, costUsd: billed.reduce((sum, record) => sum + record.costUsd, 0), fxUsdCny },
+    official: { requests: recordsOut.length, costUsd: totalMicroUsd / 1e6 },
   };
 }
 
@@ -179,7 +184,7 @@ function providerAllowed(provider, providers) {
  * official rows and whose local models all belong to the official provider set.
  * Mixed sessions (e.g. DeepSeek next to Claude in one session) are left alone.
  */
-export function applyOfficialOverlay(results, { records, fxUsdCny = 7.1, providers = DEFAULT_PROVIDERS } = {}) {
+export function applyOfficialOverlay(results, { records, providers = DEFAULT_PROVIDERS } = {}) {
   const bySession = groupBySession(records ?? []);
   const stats = { applied: 0, skippedMixed: 0, sessions: bySession.size, records: (records ?? []).length, costUsd: 0 };
   for (const result of results) {
@@ -193,7 +198,7 @@ export function applyOfficialOverlay(results, { records, fxUsdCny = 7.1, provide
       continue;
     }
     result.localAnalysis ??= result.analysis;
-    result.analysis = officialAnalysis(rows, { fxUsdCny });
+    result.analysis = officialAnalysis(rows);
     result.official = result.analysis.official;
     if (result.meta && typeof result.meta === 'object') result.meta.official = true;
     result.meta.officialCostUsd = rows.reduce((sum, record) => sum + record.costUsd, 0);
@@ -259,7 +264,7 @@ export const DEFAULT_OFFICIAL_CONFIG = resolve(dirname(new URL(import.meta.url).
 /**
  * Read `config/official.json`. Shape:
  *   { "opencode": { "enabled": true, "store": "../../.opencode-usage",
- *                   "fxUsdCny": 7.1, "providers": ["opencode"],
+ *                   "providers": ["opencode"],
  *                   "credentials": "~/.dsh/.credentials.yaml" } }
  * Relative `store`/`credentials` paths resolve against the JSON file.
  */
@@ -270,7 +275,6 @@ export function loadOfficialConfig(path = DEFAULT_OFFICIAL_CONFIG) {
     missing: true,
     enabled: true,
     store: null,
-    fxUsdCny: 7.1,
     providers: DEFAULT_PROVIDERS,
     apiBase: 'https://opencode.ai/console/api',
     credentials: expandPath('~/.dsh/.credentials.yaml', process.cwd()),

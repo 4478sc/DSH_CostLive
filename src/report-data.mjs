@@ -27,6 +27,7 @@ export function sessionRecord({ meta, analysis, projection }) {
     parentSession: meta.parentSession ?? null,
     running,
     isSubagent,
+    official: meta.official === true,
     createdAt: meta.createdAt,
     createdAtISO: meta.createdAt === null ? null : new Date(meta.createdAt).toISOString(),
     logPath: meta.logPath,

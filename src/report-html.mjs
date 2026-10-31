@@ -252,6 +252,11 @@ export function renderHtml(report) {
     unpriced.length > 0
       ? `<div class="note warn">未配置价格的模型：${unpriced.map(escapeHtml).join('、')}。其 token 正常统计，但费用记为 0。</div>`
       : '';
+  const official = report.official ?? null;
+  const officialNote =
+    official !== null && official.sessions > 0
+      ? `<div class="note">官方用量：${official.sessions} 个会话的 token 与费用取自 OpenCode 控制台日志（${official.requests} 条请求，1 USD = ${official.fxUsdCny} CNY），本地归档仅作备份。</div>`
+      : '';
   const sourceErrorNote =
     sourceErrors.length > 0
       ? `<div class="note warn">数据源不可用：${sourceErrors.map((source) => `${escapeHtml(source.label)}（${escapeHtml(source.home)}）`).join('、')}。请检查镜像是否已同步，或运行 dsh-cost-vm-sync.cmd。</div>`
@@ -461,6 +466,7 @@ export function renderHtml(report) {
 
   ${sourceErrorNote}
   ${unpricedNote}
+  ${officialNote}
 
   <section>
     <h2>按模型汇总</h2>

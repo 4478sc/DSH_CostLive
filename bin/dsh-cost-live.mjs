@@ -47,6 +47,8 @@ const HELP = `dsh-cost-live — DSH 会话费用实时面板（CNY）
   --source <label=dir>  追加一个数据源；可重复（例如 主机 / VM）
   --sources <file>      从 JSON 读取多个数据源（label + home）
   --pricing <file>      自定义价格表 JSON（默认 config/pricing.json）
+  --official <file>     官方用量归档配置（默认 config/official.json）
+  --no-official         忽略官方用量，全部用本地日志计算
   --model <text>        仅包含使用该模型（子串匹配）的会话
   --workspace <text>    按工作区目录名过滤
   --since <date>        会话创建时间下界（YYYY-MM-DD 或 ISO）
@@ -77,6 +79,7 @@ const VALUE_FLAGS = new Set([
   'home',
   'sources',
   'pricing',
+  'official',
   'model',
   'workspace',
   'since',
@@ -94,6 +97,7 @@ const BOOLEAN_FLAGS = new Set([
   'no-auto-reload',
   'all',
   'priced-only',
+  'no-official',
   'help',
 ]);
 
@@ -162,6 +166,8 @@ function reportOptionsFrom(options) {
   if (options.source !== undefined) reportOptions.sources = options.source;
   if (options.sources !== undefined) reportOptions.sourcesPath = options.sources;
   if (options.pricing !== undefined) reportOptions.pricingPath = options.pricing;
+  if (options.official !== undefined) reportOptions.official = options.official;
+  if (options['no-official'] === true) reportOptions.official = false;
   if (options.model !== undefined) reportOptions.model = options.model;
   if (options.workspace !== undefined) reportOptions.workspace = options.workspace;
   if (options.since !== undefined) reportOptions.since = options.since;

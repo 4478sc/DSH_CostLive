@@ -140,6 +140,34 @@ node bin/dsh-cost-live.mjs --host 0.0.0.0                 # 局域网访问（�
 
 ---
 
+## 官方用量：OpenCode 控制台日志（opencode-go）
+
+用 `opencode-go` 跑 DSH 时，本地日志只能推算 token，真实账单在 OpenCode 控制台
+（`opencode.ai/console`）。面板默认优先采用控制台的官方数据，本地只做归档备份：
+
+- **官方接口**：`GET https://opencode.ai/console/api/request-logs?category=inference`，每行带
+  `sessionID`（即上游 `x-opencode-session`）、`inputTokens / outputTokens / cacheReadTokens / cacheWriteTokens`
+  和 `cost`（USD），因此能按会话精确对上 DSH 会话。
+- **上游只留 30 天**：响应里的 `retentionDays` 就是保留期。`tools/opencode-sync.mjs` 每 60 秒增量拉一次，
+  追加到 `.opencode-usage/requests.jsonl`（append-only，按请求 `id` 去重），过期后本地仍有全量备份。
+- **按会话覆盖**：某个会话存在官方记录、且本地模型全属 `opencode*` 时，token 与费用改用官方值
+  （`priceKey = opencode-official`，费用 = `cost(USD) × fxUsdCny`）；混用其它供应商的会话保持本地口径，
+  不会被半截覆盖。页面顶部会显示「官方用量：N 个会话…」。
+- **配置** `config/official.json`：`store`（归档目录）、`fxUsdCny`（汇率，默认 7.1）、`providers`、
+  `credentials`（默认读 `~/.dsh/.credentials.yaml` 的 `OPENCODE_GO_API_KEY`，同名环境变量优先）。
+
+```powershell
+node tools\opencode-sync.mjs --stats     # 归档概况：条数、会话数、时间范围、USD 合计
+node tools\opencode-sync.mjs             # 增量同步一次
+node tools\opencode-sync.mjs --loop      # 每 60 秒同步；dsh-cost-live.cmd 会自动拉起
+node bin\dsh-cost.mjs --no-official      # 临时退回纯本地推算
+```
+
+`dsh-cost-live.cmd` 现在会同时拉起两个后台循环：VM 镜像同步与 OpenCode 日志同步；已在运行的不重复启动
+（锁文件 `out\vm-sync.pid` / `out\opencode-sync.pid`）。
+
+---
+
 ## 页面怎么用
 
 - **时间范围**：顶部四档按钮。切档时重算四张卡片与模型汇总，并对**筛选后的**明细重新分页；

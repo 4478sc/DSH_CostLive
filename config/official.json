@@ -1,0 +1,14 @@
+{
+  "opencode": {
+    "enabled": true,
+    "store": "../../.opencode-usage",
+    "apiBase": "https://opencode.ai/console/api",
+    "credentials": "~/.dsh/.credentials.yaml",
+    "fxUsdCny": 7.1,
+    "providers": [
+      "opencode",
+      "opencode-go"
+    ],
+    "product": null
+  }
+}

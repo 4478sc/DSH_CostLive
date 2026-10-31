@@ -9,10 +9,11 @@ import { buildReport, toCsv } from './report-data.mjs';
 import { renderHtml } from './report-html.mjs';
 import { renderDetail, renderList, renderModels, verifyProjection } from './report-text.mjs';
 import { discoverSessions, matchSession, readSession } from './sessions.mjs';
+import { applyOfficialOverlay, loadOfficialReport } from './opencode-usage.mjs';
 import { loadSources } from './sources.mjs';
 
 const COMMANDS = new Set(['list', 'session', 'models', 'report', 'help']);
-const VALUE_FLAGS = new Set(['home', 'workspace', 'model', 'since', 'until', 'format', 'out', 'top', 'pricing']);
+const VALUE_FLAGS = new Set(['home', 'workspace', 'model', 'since', 'until', 'format', 'out', 'top', 'pricing', 'official']);
 
 const HELP = `dsh-cost — DeepSeek Harness 会话费用（CNY）
 
@@ -38,6 +39,8 @@ const HELP = `dsh-cost — DeepSeek Harness 会话费用（CNY）
   --format <fmt>       table | json | csv | html（report 默认 html）
   --out <file>         报告输出文件（html/csv）
   --json               --format json 的简写
+  --official <file>    官方用量归档配置（默认 config/official.json）
+  --no-official        忽略官方用量，全部用本地日志计算
   --verify             仅校验：对比 DSH tokenUsage 投影（有缓存时）
   -h, --help           显示帮助
 
@@ -103,7 +106,7 @@ function parseArgs(argv) {
       options[name] = value;
       continue;
     }
-    if (name === 'steps' || name === 'priced-only' || name === 'all' || name === 'verify' || name === 'verbose') {
+    if (name === 'steps' || name === 'priced-only' || name === 'all' || name === 'verify' || name === 'verbose' || name === 'no-official') {
       options[name] = true;
       continue;
     }
@@ -276,8 +279,31 @@ export function main(argv = process.argv.slice(2)) {
   }
 
   let results;
+  let official = null;
   try {
     results = filterResults(analyzeAll(selected, pricing, options), options);
+    try {
+      const officialReport = loadOfficialReport({
+        officialPath: options.official,
+        enabled: options['no-official'] !== true,
+      });
+      if (officialReport !== null) {
+        const stats = applyOfficialOverlay(results, {
+          records: officialReport.records,
+          fxUsdCny: officialReport.config.fxUsdCny,
+          providers: officialReport.config.providers,
+        });
+        official = {
+          store: officialReport.config.store,
+          fxUsdCny: officialReport.config.fxUsdCny,
+          requests: officialReport.summary.requests,
+          sessions: stats.applied,
+          skippedMixed: stats.skippedMixed,
+        };
+      }
+    } catch (error) {
+      process.stderr.write(`dsh-cost: official usage ignored: ${error.message}\n`);
+    }
   } catch (error) {
     process.stderr.write(`dsh-cost: ${error.message}\n`);
     return 2;
@@ -291,8 +317,12 @@ export function main(argv = process.argv.slice(2)) {
   }
 
   const generatedAt = Date.now();
+  const attachOfficial = (report) => {
+    if (official !== null) report.official = official;
+    return report;
+  };
   if (format === 'json') {
-    const report = buildReport({ home, sources: sourceStats, pricing, results, generatedAt });
+    const report = attachOfficial(buildReport({ home, sources: sourceStats, pricing, results, generatedAt }));
     const text = `${JSON.stringify(report, null, 2)}\n`;
     if (options.out !== undefined) {
       const target = writeOut(options.out, text);
@@ -303,7 +333,7 @@ export function main(argv = process.argv.slice(2)) {
     return 0;
   }
   if (format === 'csv') {
-    const report = buildReport({ home, sources: sourceStats, pricing, results, generatedAt });
+    const report = attachOfficial(buildReport({ home, sources: sourceStats, pricing, results, generatedAt }));
     if (options.out !== undefined) {
       // A UTF-8 BOM keeps Excel on Windows from reading Chinese titles as ANSI.
       const target = writeOut(options.out, `\uFEFF${toCsv(report)}`);
@@ -314,7 +344,7 @@ export function main(argv = process.argv.slice(2)) {
     return 0;
   }
   if (format === 'html') {
-    const report = buildReport({ home, sources: sourceStats, pricing, results, generatedAt });
+    const report = attachOfficial(buildReport({ home, sources: sourceStats, pricing, results, generatedAt }));
     const target = writeOut(options.out ?? 'dsh-cost-report.html', renderHtml(report));
     process.stdout.write(`HTML 报告已生成: ${target}\n`);
     process.stdout.write(`会话 ${report.summary.sessions} 个 · 总费用 ${formatCny(report.summary.costCny)} · Token ${report.summary.totalTokens.toLocaleString('en-US')}\n`);
@@ -327,6 +357,9 @@ export function main(argv = process.argv.slice(2)) {
     return 0;
   }
   process.stdout.write(`${renderList(results, { pricing, home, sources: sourceStats, generatedAt })}\n`);
+  if (official !== null) {
+    process.stdout.write(`官方用量  ${official.sessions} 个会话取自 OpenCode 控制台日志 · ${official.requests} 条请求 · 1 USD = ${official.fxUsdCny} CNY\n`);
+  }
   if (options.verify === true) {
     const checked = results.map((result) => ({ result, verification: verifyProjection(result) })).filter((entry) => entry.verification !== null);
     const mismatched = checked.filter((entry) => !entry.verification.ok);

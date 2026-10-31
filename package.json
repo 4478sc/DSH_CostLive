@@ -29,7 +29,7 @@
     "node": ">=22.15"
   },
   "scripts": {
-    "test": "node --test --test-isolation=none test/activity.test.mjs test/pricing.test.mjs test/engine.test.mjs test/zstd.test.mjs test/sessions.test.mjs test/live.test.mjs test/time-range.test.mjs test/daily.test.mjs test/sources.test.mjs",
+    "test": "node --test --test-isolation=none test/activity.test.mjs test/pricing.test.mjs test/engine.test.mjs test/zstd.test.mjs test/sessions.test.mjs test/live.test.mjs test/time-range.test.mjs test/daily.test.mjs test/sources.test.mjs test/opencode-usage.test.mjs",
     "test:node22": "node --experimental-test-isolation=none --test test/*.test.mjs",
     "demo": "node tools/make-demo-home.mjs",
     "live": "node bin/dsh-cost-live.mjs",

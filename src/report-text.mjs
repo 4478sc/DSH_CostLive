@@ -186,7 +186,7 @@ export function renderDetail(result, { pricing, steps = false }) {
 export function verifyProjection(result) {
   const expected = result.projection?.tokenUsage?.totals;
   if (expected === undefined || expected === null) return null;
-  const actual = result.analysis.totals.tokens;
+  const actual = (result.localAnalysis ?? result.analysis).totals.tokens;
   const ok =
     expected.uncachedInputTokens === actual.uncachedInputTokens &&
     expected.outputTokens === actual.outputTokens &&

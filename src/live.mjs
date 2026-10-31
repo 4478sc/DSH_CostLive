@@ -15,6 +15,7 @@ import { loadPricing } from './pricing.mjs';
 import { buildReport } from './report-data.mjs';
 import { escapeHtml, renderHtml } from './report-html.mjs';
 import { discoverSessions, readSession } from './sessions.mjs';
+import { applyOfficialOverlay, loadOfficialReport } from './opencode-usage.mjs';
 import { loadSources } from './sources.mjs';
 import { timeRangeRuntimeSource } from './time-range.mjs';
 
@@ -179,16 +180,41 @@ export function collectLiveReport(options = {}) {
     throw new Error(`没有可用的 DSH 数据目录：${sources.map((source) => `${source.label}=${source.home}`).join(', ')}`);
   }
   const filtered = filterResults(results, options);
+  let official = null;
+  try {
+    const officialReport = loadOfficialReport({
+      officialPath: options.officialPath ?? options.official,
+      enabled: options.official !== false && options.noOfficial !== true,
+    });
+    if (officialReport !== null) {
+      const stats = applyOfficialOverlay(filtered, {
+        records: officialReport.records,
+        fxUsdCny: officialReport.config.fxUsdCny,
+        providers: officialReport.config.providers,
+      });
+      official = {
+        store: officialReport.config.store,
+        fxUsdCny: officialReport.config.fxUsdCny,
+        requests: officialReport.summary.requests,
+        sessions: stats.applied,
+        skippedMixed: stats.skippedMixed,
+      };
+    }
+  } catch (error) {
+    if (typeof options.onWarning === 'function') options.onWarning(`official usage ignored: ${error.message}`);
+  }
   for (const source of sourceStats) {
     source.sessions = filtered.filter((result) => result.meta.source === source.label).length;
   }
-  return buildReport({
+  const report = buildReport({
     home: sources[0].home,
     sources: sourceStats,
     pricing,
     results: filtered,
     generatedAt: Date.now(),
   });
+  if (official !== null) report.official = official;
+  return report;
 }
 
 /**

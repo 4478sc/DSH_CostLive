@@ -86,6 +86,51 @@ export async function fetchPage(config, key, { since = 0, cursor = null, limit =
   throw new Error('request-logs: retries exhausted');
 }
 
+/**
+ * The console's own day totals (`/usage/cost-by-day`, UTC dates). Kept next to
+ * our archive so the page can show "official says X" for the same window: the
+ * console buckets by UTC day while the dashboard buckets by the local day, and
+ * a 7-day window can differ by roughly one day boundary.
+ */
+export async function fetchConsoleTotals(config, key) {
+  const base = config.apiBase.replace(/\/$/u, '');
+  const getJson = async (path) => {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const response = await fetch(`${base}${path}`, { headers: { authorization: `Bearer ${key}`, accept: 'application/json' } });
+      if (response.status === 429 || response.status >= 500) {
+        await new Promise((done) => setTimeout(done, 400 * 2 ** attempt));
+        continue;
+      }
+      if (!response.ok) {
+        console.log(`[opencode] ${path} -> HTTP ${response.status}`);
+        return null;
+      }
+      return response.json();
+    }
+    return null;
+  };
+  const [days, summary] = await Promise.all([getJson('/usage/cost-by-day'), getJson('/usage/summary')]);
+  return {
+    updatedAt: Date.now(),
+    days: Array.isArray(days)
+      ? days.map((day) => ({
+          date: day.date,
+          costUsd: Number(day.totalCostMicroCents || 0) / 1e8,
+          requests: Number(day.totalRequests || 0),
+        }))
+      : [],
+    summary: summary
+      ? {
+          costUsd: Number(summary.totalCostMicroCents || 0) / 1e8,
+          requests: Number(summary.totalRequests || 0),
+          inputTokens: Number(summary.totalInputTokens || 0),
+          outputTokens: Number(summary.totalOutputTokens || 0),
+          cacheReadTokens: Number(summary.totalCacheReadTokens || 0),
+        }
+      : null,
+  };
+}
+
 function readState(store) {
   const file = `${store}/state.json`;
   if (!existsSync(file)) return { lastSyncAt: 0, lastUntil: 0, count: 0 };
@@ -137,6 +182,14 @@ export async function syncOnce(config, { full = false, dryRun = false, log = con
     appendFileSync(file, merged.records.slice(-merged.added).map((record) => `${JSON.stringify(record)}\n`).join(''), 'utf8');
   }
   const summary = summarizeStore(merged.records);
+  let consoleTotals = null;
+  if (!dryRun) {
+    try {
+      consoleTotals = await fetchConsoleTotals(config, key);
+    } catch (error) {
+      log(`[opencode] console totals unavailable: ${error instanceof Error ? error.message : error}`);
+    }
+  }
   if (!dryRun) {
     writeState(store, {
       lastSyncAt: Date.now(),
@@ -145,6 +198,7 @@ export async function syncOnce(config, { full = false, dryRun = false, log = con
       earliest: summary.earliest,
       newest: summary.newest,
       pages,
+      console: consoleTotals ?? state.console ?? null,
       updatedAtISO: new Date().toISOString(),
     });
   }

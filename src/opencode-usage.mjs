@@ -334,3 +334,42 @@ export function loadOfficialReport({ officialPath, enabled = true } = {}) {
   if (records.length === 0) return null;
   return { config, records, summary: summarizeStore(records) };
 }
+
+/** Read the sync state file (console totals live there). */
+export function loadOfficialState(storeDir) {
+  const file = `${storeDir}/state.json`;
+  if (!existsSync(file)) return null;
+  try {
+    return JSON.parse(readFileSync(file, 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Console totals for the windows the page offers. The console buckets by UTC
+ * calendar day, the dashboard by the local day, so these are the numbers to
+ * quote when comparing with `opencode.ai/console`.
+ */
+export function consoleWindowTotals(consoleTotals, now = Date.now()) {
+  const days = Array.isArray(consoleTotals?.days) ? consoleTotals.days : [];
+  if (days.length === 0) return null;
+  const utcDay = (ms) => new Date(ms).toISOString().slice(0, 10);
+  const key = utcDay(now);
+  const shift = (offset) => {
+    const date = new Date(`${key}T00:00:00Z`);
+    date.setUTCDate(date.getUTCDate() - offset);
+    return utcDay(date.getTime());
+  };
+  const cut7 = shift(6);
+  const cut30 = shift(29);
+  const totals = { today: 0, '7d': 0, '30d': 0, all: 0 };
+  for (const day of days) {
+    const usd = Number(day.costUsd) || 0;
+    totals.all += usd;
+    if (day.date >= cut30) totals['30d'] += usd;
+    if (day.date >= cut7) totals['7d'] += usd;
+    if (day.date === key) totals.today += usd;
+  }
+  return { ...totals, days: days.length, updatedAt: consoleTotals.updatedAt ?? null };
+}

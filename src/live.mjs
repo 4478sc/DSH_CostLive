@@ -16,7 +16,7 @@ import { buildReport } from './report-data.mjs';
 import { buildReportDataset, escapeHtml, renderHtml } from './report-html.mjs';
 import { discoverSessions, readSession } from './sessions.mjs';
 import { sortCostMicro } from './money.mjs';
-import { applyOfficialOverlay, loadOfficialReport } from './opencode-usage.mjs';
+import { applyOfficialOverlay, consoleWindowTotals, loadOfficialReport, loadOfficialState } from './opencode-usage.mjs';
 import { loadSources } from './sources.mjs';
 import { timeRangeRuntimeSource } from './time-range.mjs';
 
@@ -201,6 +201,7 @@ export function collectLiveReport(options = {}) {
         requests: officialReport.summary.requests,
         sessions: stats.applied,
         skippedMixed: stats.skippedMixed,
+        console: consoleWindowTotals(loadOfficialState(officialReport.config.store)?.console),
       };
     }
   } catch (error) {

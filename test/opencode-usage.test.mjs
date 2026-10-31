@@ -5,6 +5,7 @@ import { renderLiveFragment } from '../src/live.mjs';
 import { aggregateRangeStats } from '../src/time-range.mjs';
 import {
   applyOfficialOverlay,
+  consoleWindowTotals,
   groupBySession,
   mergeOfficialRecords,
   normalizeLogItem,
@@ -260,4 +261,23 @@ test('daily buckets aggregate every sample of a session, not just the last', () 
   assert.equal(day.sessions[0].tokens.cacheReadTokens, 300, 'session keeps all samples');
   assert.equal(day.sessions[0].costMicroUsd, 3_000_000);
   assert.equal(day.sessions[0].models[0].tokens.cacheReadTokens, 300);
+});
+
+test('console window totals follow the UTC calendar days the console uses', () => {
+  const consoleTotals = {
+    days: [
+      { date: '2026-10-29', costUsd: 1 },
+      { date: '2026-10-30', costUsd: 2 },
+      { date: '2026-10-31', costUsd: 4 },
+      { date: '2026-11-01', costUsd: 8 },
+    ],
+    updatedAt: 1,
+  };
+  const now = Date.parse('2026-11-01T03:00:00Z');
+  const totals = consoleWindowTotals(consoleTotals, now);
+  assert.equal(totals.today, 8);
+  assert.equal(totals['7d'], 15);
+  assert.equal(totals['30d'], 15);
+  assert.equal(totals.all, 15);
+  assert.equal(consoleWindowTotals({ days: [] }, now), null);
 });

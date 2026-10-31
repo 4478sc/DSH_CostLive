@@ -1,6 +1,6 @@
 /** Self-contained HTML report. */
 import { activityLabel, sortSessionRecords } from './activity.mjs';
-import { formatMoney, sortCostMicro } from './money.mjs';
+import { formatMoney, formatUsd, sortCostMicro } from './money.mjs';
 import { describePeakHours, formatCny, formatTokens } from './pricing.mjs';
 import { formatPercent, formatTime } from './format.mjs';
 import { buildTimeRangeDataset, modelCacheSavingMicro } from './report-data.mjs';
@@ -276,6 +276,11 @@ export function renderHtml(report) {
       ? `<div class="note warn">未配置价格的模型：${unpriced.map(escapeHtml).join('、')}。其 token 正常统计，但费用记为 0。</div>`
       : '';
   const official = report.official ?? null;
+  const consoleTotals = report.official?.console ?? null;
+  const consoleNote =
+    consoleTotals !== null
+      ? `<div class="note">官网口径（UTC 日）：今天 ${formatUsd(consoleTotals.today)} · 7 天 ${formatUsd(consoleTotals['7d'])} · 30 天 ${formatUsd(consoleTotals['30d'])}。本页按本机时区切日，与官网窗口相差 8 小时，短窗口差额最明显。</div>`
+      : '';
   const officialNote =
     official !== null && official.sessions > 0
       ? `<div class="note">官方用量：${official.sessions} 个会话的 token 与费用取自 OpenCode 控制台日志（${official.requests} 条请求，按 USD 计费，不折算），本地归档仅作备份。</div>`
@@ -490,6 +495,7 @@ export function renderHtml(report) {
   ${sourceErrorNote}
   ${unpricedNote}
   ${officialNote}
+  ${consoleNote}
 
   <section>
     <h2>按模型汇总</h2>

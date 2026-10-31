@@ -64,14 +64,30 @@ export function mergeOfficialRecords(existing, incoming) {
   const byId = new Map();
   for (const record of existing ?? []) byId.set(record.id, record);
   let added = 0;
+  let updated = 0;
   for (const record of incoming ?? []) {
     if (record === null || record === undefined) continue;
-    if (byId.has(record.id)) continue;
-    byId.set(record.id, record);
-    added += 1;
+    const previous = byId.get(record.id);
+    if (previous === undefined) {
+      byId.set(record.id, record);
+      added += 1;
+      continue;
+    }
+    // The console finalises a request's cost/tokens after it completes; keep
+    // the later, authoritative numbers instead of the first sighting.
+    if (
+      previous.costUsd !== record.costUsd ||
+      previous.tokens.uncachedInputTokens !== record.tokens.uncachedInputTokens ||
+      previous.tokens.outputTokens !== record.tokens.outputTokens ||
+      previous.tokens.cacheReadTokens !== record.tokens.cacheReadTokens ||
+      previous.statusCode !== record.statusCode
+    ) {
+      byId.set(record.id, record);
+      updated += 1;
+    }
   }
   const records = [...byId.values()].sort((a, b) => a.startedAt - b.startedAt || (a.id < b.id ? -1 : 1));
-  return { records, added };
+  return { records, added, updated };
 }
 
 /** Group records by normalized session id. */
@@ -149,7 +165,9 @@ export function officialAnalysis(records, { usdRates = {} } = {}) {
     .sort((a, b) => b.costMicroUsd - a.costMicroUsd);
 
   const recordsOut = billed.map((record) => ({
-    time: record.startedAt,
+    // Billed at completion: the console's day buckets follow the finish time,
+    // so use it to keep per-day totals aligned with opencode.ai.
+    time: record.finishedAt ?? record.startedAt,
     provider: record.provider,
     model: record.model,
     priceKey: 'opencode-official',

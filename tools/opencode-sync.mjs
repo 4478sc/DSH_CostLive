@@ -12,7 +12,7 @@
  * Auth: `OPENCODE_GO_API_KEY` from the environment or from the DSH credential
  * store (`~/.dsh/.credentials.yaml`, `refs:` section).
  */
-import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import {
   expandPath,
@@ -178,8 +178,11 @@ export async function syncOnce(config, { full = false, dryRun = false, log = con
     if (items.length > 0 && Math.min(...items.map((item) => Number(item.startedAt) || Infinity)) < since) break;
   }
   const merged = mergeOfficialRecords(existing, incoming);
-  if (!dryRun && merged.added > 0) {
-    appendFileSync(file, merged.records.slice(-merged.added).map((record) => `${JSON.stringify(record)}\n`).join(''), 'utf8');
+  if (!dryRun && (merged.added > 0 || merged.updated > 0)) {
+    // Rewrite in sorted order: revisions must replace rows, not duplicate them.
+    const temp = `${file}.tmp`;
+    writeFileSync(temp, merged.records.map((record) => `${JSON.stringify(record)}\n`).join(''), 'utf8');
+    renameSync(temp, file);
   }
   const summary = summarizeStore(merged.records);
   let consoleTotals = null;
@@ -203,7 +206,7 @@ export async function syncOnce(config, { full = false, dryRun = false, log = con
     });
   }
   log(
-    `[opencode] pages=${pages} fetched=${incoming.length} added=${merged.added} total=${summary.requests} sessions=${summary.sessions} usd=${summary.costUsd.toFixed(4)}`,
+    `[opencode] pages=${pages} fetched=${incoming.length} added=${merged.added} updated=${merged.updated} total=${summary.requests} sessions=${summary.sessions} usd=${summary.costUsd.toFixed(4)}`,
   );
   return { pages, fetched: incoming.length, added: merged.added, ...summary, store };
 }

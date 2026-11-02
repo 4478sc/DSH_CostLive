@@ -1,8 +1,9 @@
 # DSH_CostLive
 
-> 给 DeepSeek Harness（DSH）会话做的**本地费用实时面板**：
+> 给 DeepSeek Harness（DSH）会话做的**费用实时面板**：
 > 每 20 秒重新扫描会话日志，按模型、按 token 桶（未缓存输入 / 输出 / 缓存写 / 缓存读）计价，
 > 在浏览器里显示人民币花费、缓存命中、运行中会话与历史明细。
+> 既可以本机单跑，也可以把统计与官网同步放进虚拟机/小主机、宿主机只推送会话与凭据。
 
 [![Node](https://img.shields.io/badge/node-%E2%89%A522.15-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
 [![tests](https://github.com/4478sc/DSH_CostLive/actions/workflows/test.yml/badge.svg)](https://github.com/4478sc/DSH_CostLive/actions/workflows/test.yml)
@@ -36,7 +37,7 @@ DSH 会把每个会话的完整事件流写进 `~/.dsh/sessions/` 下的 zstd �
 | 能力 | 说明 |
 |---|---|
 | 20 秒实时刷新 | 浏览器轮询 `/api/fragment`，只替换报表主体，滚动位置与展开行不丢 |
-| 多数据源 | 同时扫描主机 `~/.dsh` 与 VMware 里的 DSH（镜像目录），合并统计并标注「主机 / VM」 |
+| 多数据源 | 同时扫描多个 DSH home（本机 + 另一台机器推送来的镜像），合并统计并标注来源 |
 | 四档时间范围 | `All time` / `Last 30 days` / `Last 7 days` / `Today`，卡片、模型表、明细同步重算，选择持久化 |
 | 按天费用视图 | 「按会话 / 按天」切换；按采样时间切日，跨天会话拆到两天，严格回答「今天花了多少」 |
 | 运行中优先 | 运行中主会话 → 运行中子代理 → 已完成（费用降序）；运行中行高亮 + 脉冲标签 |
@@ -101,7 +102,36 @@ node bin/dsh-cost-live.mjs --host 0.0.0.0                 # 局域网访问（�
 
 ---
 
-## 同时监测主机与 VMware 里的 DSH
+## 分体部署：统计在虚拟机，宿主机只推送
+
+面板不必和 DSH 跑在同一台机器上。把「统计 + 官网同步」放进一台常开的虚拟机（或小主机），
+宿主机只负责推送，两台机器各用自己的地址看同一个页面：
+
+```text
+宿主机                                        虚拟机 / 小主机
+~/.dsh/sessions + storages/session_projcache ──20 s 增量 SSH 推送──▶ ~/.dsh-host   ┐
+~/.dsh/.credentials.yaml ──只取 OPENCODE_GO_API_KEY──▶ ~/.dsh-push/credentials.yaml  │
+官方用量归档（仅在首次迁移时 seed 一次）─────────────────▶ ~/.opencode-usage        ├─▶ 扫描 / 计价 / 渲染
+虚拟机自己的 ~/.dsh ─────────────────────────────────────────────────────────────────┘   HTTP 0.0.0.0:4173
+opencode.ai 控制台 ──虚拟机每 60 s 拉取──▶ ~/.opencode-usage/requests.jsonl（官方 USD 覆盖）
+```
+
+- 虚拟机侧跑两件事：`node bin/dsh-cost-live.mjs --sources config/sources.json --host 0.0.0.0 --port 4173`
+  与 `node tools/opencode-sync.mjs --config config/official.json --loop`。`sources.json` 指向两个 home：
+  `{"label": "host", "home": "~/.dsh-host"}` 和 `{"label": "vm", "home": "~/.dsh"}`。
+- 宿主机侧只做推送：会话日志（Windows `tar` + `scp`，20 秒增量，只发 mtime 变化的文件）、
+  只含 `OPENCODE_GO_API_KEY` 的最小凭据文件（0600）、首次迁移时的归档 seed。宿主机不读日志、不计价、不同步官网。
+- 访问地址：虚拟机内 `http://127.0.0.1:4173/`，宿主机 `http://<vm-ip>:4173/`（仅在私有网段可达）。
+- 自启与自愈：虚拟机用 cron（`@reboot` + 每 2 分钟看护）——`/api/health` 不通就重启服务，
+  归档 `lastSyncAt` 超过 15 分钟就强制重启同步循环；宿主机把推送循环注册成登录任务（或手动双击启动器）。
+- 同步循环的 `fetch` 带 30 秒超时，锁文件用 `/proc/<pid>/cmdline` 确认持有者真的是同步进程，
+  避免「进程还在但不干活」和「重启后 pid 复用把循环挡住」两种假死。
+
+> 旧的主机侧拉取模式（`tools/sync-vm-dsh.ps1` + `.dsh-vm/`）仍然保留，适合只想在一台机器上看两边数据的情况。
+
+---
+
+## 旧模式：把虚拟机的日志拉到宿主机（可选）
 
 主机和 Ubuntu VM 各跑一个 DSH 时，面板可以同时读两边，不需要把日志传到外部服务：
 
@@ -136,7 +166,7 @@ node bin/dsh-cost-live.mjs --host 0.0.0.0                 # 局域网访问（�
 - VM 关机时同步脚本跳过并每 60 秒重试；面板仍显示主机数据，并在顶部提示「数据源不可用」。
 - 会话行会带「主机 / VM」标签；卡片、模型汇总、会话数、按天视图都是两边合并后的结果。
 - CLI 同样支持：`node bin\dsh-cost.mjs --sources config\sources.json`，或用 `--source 主机=~/.dsh --source VM=F:\...\.dsh-vm` 临时指定。
-- VM 地址/用户/私钥可在 `tools/sync-vm-dsh.ps1` 顶部参数中修改（默认 `192.168.140.133` / `asic` / `%USERPROFILE%\.ssh\vm_ed25519`）。
+- VM 地址、用户、私钥与远端 DSH 目录都是 `tools/sync-vm-dsh.ps1` 的参数（`-VmHost` 必填，其余有默认值）。
 
 ---
 

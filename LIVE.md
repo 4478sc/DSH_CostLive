@@ -267,7 +267,7 @@ node .\bin\dsh-cost-live.mjs --once --auto-reload --out .\out\dsh-cost-live.html
 
 ```powershell
 node .\bin\dsh-cost-live.mjs --model claude-sonnet-5-5   # 只含 sonnet 会话
-node .\bin\dsh-cost-live.mjs --workspace dsh_somedata    # 按工作区目录名过滤
+node .\bin\dsh-cost-live.mjs --workspace my-project    # 按工作区目录名过滤
 node .\bin\dsh-cost-live.mjs --since 2026-10-01          # 创建时间下界
 node .\bin\dsh-cost-live.mjs --priced-only               # 只含费用 > 0 的会话
 node .\bin\dsh-cost-live.mjs --top 10                    # 费用最高的 10 个

@@ -1,14 +1,15 @@
 param(
-  [string]$VmHost = '192.168.140.133',
-  [string]$User = 'asic',
+  [Parameter(Mandatory = $true)][string]$VmHost,
+  [string]$User = 'ubuntu',
   [int]$Port = 22,
-  [string]$KeyPath = "$env:USERPROFILE\.ssh\vm_ed25519",
-  [string]$RemoteHome = '/home/asic/.dsh',
+  [string]$KeyPath = "$env:USERPROFILE\.ssh\id_ed25519",
+  [string]$RemoteHome = '',
   [string]$Mirror = '',
   [switch]$Full
 )
 
 $ErrorActionPreference = 'Continue'
+if ([string]::IsNullOrWhiteSpace($RemoteHome)) { $RemoteHome = "/home/$User/.dsh" }
 if ([string]::IsNullOrWhiteSpace($Mirror)) {
   $Mirror = Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) '.dsh-vm'
 }

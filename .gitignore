@@ -18,3 +18,10 @@ desktop.ini
 
 # VM DSH mirror (sessions copied from the Ubuntu guest)
 .dsh-vm/
+
+# official usage archive = real billing data, never commit
+.opencode-usage/
+
+# local hand-over prompts / personal notes
+HANDOVER*.md
+HANDOVER*.txt

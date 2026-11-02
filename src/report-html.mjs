@@ -294,7 +294,7 @@ export function renderHtml(report) {
   const staleStore = storeAgeMinutes !== null && storeAgeMinutes >= 5;
   const consoleNote =
     officialWindows !== null
-      ? `<div class="note${staleStore ? ' warn' : ''}">官方口径：今天 ${formatUsd(officialWindows.today)}（本地日）· 7 天 ${formatUsd(officialWindows['7d'])} · 30 天 ${formatUsd(officialWindows['30d'])}（滚动 24 小时 ×N，与官网一致）。本页按自然日切分，7 天窗口会比官网略小。归档 ${storeAgeText}${staleStore ? '——同步循环可能已停止，请检查 dsh-cost-opencode-sync.cmd' : ''}。</div>`
+      ? `<div class="note${staleStore ? ' warn' : ''}">官方口径：今天 ${formatUsd(officialWindows.today)}（本地日）· 7 天 ${formatUsd(officialWindows['7d'])} · 30 天 ${formatUsd(officialWindows['30d'])}（滚动 24 小时 ×N，与官网一致）。本页按自然日切分，7 天窗口会比官网略小。归档 ${storeAgeText}${staleStore ? '——同步循环可能已停止，请在服务端执行 vm/ensure.sh（或重跑 opencode-sync --loop，日志见 logs/sync.log）' : ''}。</div>`
       : '';
   const pendingCount = sessions.filter((session) => session.officialPending === true).length;
   const pendingNote =

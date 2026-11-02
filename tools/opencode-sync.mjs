@@ -33,18 +33,33 @@ const MAX_PAGES = 2000;
  * One writer per store: a second loop (or a manual run next to the dashboard's
  * loop) would append the same rows twice until the next dedupe.
  */
+/**
+ * A pid in the lock file is only "another sync" when that pid still exists AND
+ * really is an opencode-sync process. Pids get recycled across reboots, and a
+ * bare `process.kill(pid, 0)` would then block the loop forever (seen 2026-11-02).
+ */
+function isSyncProcess(pid) {
+  try {
+    return readFileSync(`/proc/${pid}/cmdline`, 'utf8').includes('opencode-sync');
+  } catch {
+    /* no /proc (Windows/macOS) or the pid is gone */
+  }
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function acquireStoreLock(store) {
   const file = `${store}/.sync.pid`;
   if (existsSync(file)) {
     const raw = readFileSync(file, 'utf8').trim();
     if (/^\d+$/u.test(raw)) {
       const pid = Number(raw);
-      try {
-        process.kill(pid, 0);
-        return { ok: false, pid, file };
-      } catch {
-        /* stale lock from a crashed run */
-      }
+      if (isSyncProcess(pid)) return { ok: false, pid, file };
+      /* stale pid (crashed run or a recycled pid): take the lock over */
     }
   }
   writeFileSync(file, String(process.pid), 'utf8');
@@ -72,7 +87,12 @@ export async function fetchPage(config, key, { since = 0, cursor = null, limit =
   if (cursor !== null) url.searchParams.set('cursor', cursor);
   if (config.product) url.searchParams.set('product', String(config.product));
   for (let attempt = 0; attempt < 3; attempt += 1) {
-    const response = await fetch(url, { headers: { authorization: `Bearer ${key}`, accept: 'application/json' } });
+    const response = await fetch(url, {
+      headers: { authorization: `Bearer ${key}`, accept: 'application/json' },
+      // A hung socket must not freeze the loop: the watchdog then sees a live
+      // process that never updates the archive and cannot help.
+      signal: AbortSignal.timeout(30_000),
+    });
     if (response.status === 429 || response.status >= 500) {
       await sleep(500 * 2 ** attempt);
       continue;
@@ -96,7 +116,10 @@ export async function fetchConsoleTotals(config, key) {
   const base = config.apiBase.replace(/\/$/u, '');
   const getJson = async (path) => {
     for (let attempt = 0; attempt < 3; attempt += 1) {
-      const response = await fetch(`${base}${path}`, { headers: { authorization: `Bearer ${key}`, accept: 'application/json' } });
+      const response = await fetch(`${base}${path}`, {
+        headers: { authorization: `Bearer ${key}`, accept: 'application/json' },
+        signal: AbortSignal.timeout(20_000),
+      });
       if (response.status === 429 || response.status >= 500) {
         await new Promise((done) => setTimeout(done, 400 * 2 ** attempt));
         continue;

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { buildReport, buildTimeRangeDataset } from '../src/report-data.mjs';
 import { renderLiveFragment } from '../src/live.mjs';
-import { aggregateRangeStats } from '../src/time-range.mjs';
+import { aggregateRangeStats, formatDay, localMidnight } from '../src/time-range.mjs';
 import {
   applyOfficialOverlay,
   officialWindowTotals,
@@ -159,7 +159,10 @@ test('buildReport keeps CNY and USD totals apart instead of converting', () => {
   assert.equal(report.summary.costUsd, 2.5);
   assert.equal(report.sessions.find((s) => s.id === 'official-1').official, true);
   assert.equal(report.sessions.find((s) => s.id === 'local-1').official, false);
-  const day = report.daily.days.find((d) => d.day === '2026-10-31');
+  // Day buckets are local-calendar: derive the key instead of hard-coding a
+  // date, otherwise the test only passes in UTC+08:00 (it failed on CI's UTC runner).
+  const expectedDay = formatDay(localMidnight(1793400100000));
+  const day = report.daily.days.find((d) => d.day === expectedDay);
   assert.equal(day.totals.costMicroCny, 1_000_000);
   assert.equal(day.totals.costMicroUsd, 2_500_000);
 });

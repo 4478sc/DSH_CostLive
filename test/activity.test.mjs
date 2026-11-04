@@ -122,6 +122,19 @@ test('projection openStep marks running, with turnBoundary as fallback', () => {
   );
 });
 
+test('a step left open for hours counts as abandoned, not running', () => {
+  const now = 1_800_000_000_000;
+  const fresh = { turn: 1, step: 2, startTime: now - 60_000 };
+  const zombie = { turn: 1, step: 2, startTime: now - 6 * 3_600_000 };
+  assert.equal(projectionIsRunning({ sessionStats: { openStep: fresh } }, now), true);
+  assert.equal(projectionIsRunning({ sessionStats: { openStep: zombie } }, now), false);
+  // No timestamp at all keeps the historical (trusting) behaviour.
+  assert.equal(projectionIsRunning({ sessionStats: { openStep: { turn: 1, step: 2 } } }, now), true);
+  // The cache mtime is the fallback when openStep carries no start time.
+  assert.equal(projectionIsRunning({ sessionStats: { openStep: {} }, mtimeMs: now - 10 * 3_600_000 }, now), false);
+  assert.equal(projectionIsRunning({ sessionStats: { openStep: {} }, mtimeMs: now - 1_000 }, now), true);
+});
+
 test('subagent detection prefers projection identity and falls back to log origin', () => {
   assert.equal(isSubagentSession({ origin: null }, null), false);
   assert.equal(isSubagentSession({ origin: 'subagent' }, null), true);

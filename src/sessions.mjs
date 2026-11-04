@@ -48,8 +48,15 @@ export function readProjectionCache(home, id) {
     const parsed = JSON.parse(readFileSync(file, 'utf8'));
     const rows = parsed?.record?.rows;
     if (rows === null || typeof rows !== 'object') return null;
+    let mtimeMs = 0;
+    try {
+      mtimeMs = statSync(file).mtimeMs;
+    } catch {
+      /* racing deletion */
+    }
     return {
       file,
+      mtimeMs,
       title: typeof rows.title?.val === 'string' ? rows.title.val : null,
       tokenUsage: rows.tokenUsage?.val ?? null,
       modelSelection: rows.modelSelection?.val ?? null,

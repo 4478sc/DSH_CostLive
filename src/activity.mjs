@@ -20,14 +20,28 @@ export const ACTIVITY_RUNNING_MAIN = 0;
 export const ACTIVITY_RUNNING_SUBAGENT = 1;
 export const ACTIVITY_COMPLETED = 2;
 
+/**
+ * How long an open step may stay open before it is treated as abandoned.
+ * DSH keeps `openStep` set when the app is killed, and a session that resumes
+ * after a reboot can keep an old step start time, so such a flag would
+ * otherwise read "running" forever (seen 2026-11-04: 7 zombies after a reboot).
+ */
+export const STALE_STEP_MS = 2 * 60 * 60 * 1000;
+
 /** True when the projection reports an in-flight step (openStep != null). */
-export function projectionIsRunning(projection) {
+export function projectionIsRunning(projection, now = Date.now()) {
   if (projection === null || projection === undefined) return false;
   const stats = projection.sessionStats;
   // An explicit openStep (including null) is authoritative; only fall back to
   // turnBoundary when the cache predates sessionStats or omits the field.
   if (stats !== null && stats !== undefined && typeof stats === 'object' && stats.openStep !== undefined) {
-    return stats.openStep !== null;
+    if (stats.openStep === null) return false;
+    const startedAt = typeof stats.openStep?.startTime === 'number' ? stats.openStep.startTime : 0;
+    const cacheAt = typeof projection.mtimeMs === 'number' ? projection.mtimeMs : 0;
+    const last = Math.max(startedAt, cacheAt);
+    // No timestamp at all: keep the historical behaviour (trust the flag).
+    if (last > 0 && now - last > STALE_STEP_MS) return false;
+    return true;
   }
   const boundary = projection.turnBoundary;
   if (boundary !== null && boundary !== undefined && typeof boundary === 'object') {

@@ -182,6 +182,7 @@ export function buildDailyReport(results, pricing) {
         model = {
           provider: record.provider ?? null,
           model: record.model ?? null,
+          priceKey: record.priceKey ?? null,
           priced: record.priced === true,
           costMicroCny: 0,
           costMicroUsd: 0,
@@ -230,11 +231,11 @@ export function buildDailyReport(results, pricing) {
           .map((model) => ({
             provider: model.provider,
             model: model.model,
+            priceKey: model.priceKey ?? null,
             priced: model.priced,
             costMicroCny: model.costMicroCny,
             costMicroUsd: model.costMicroUsd,
             cacheSavingMicro: model.cacheSavingMicro,
-          cacheSavingMicroUsd: model.cacheSavingMicroUsd ?? 0,
             cacheSavingMicroUsd: model.cacheSavingMicroUsd,
             tokens: { ...model.tokens, totalTokens: tokensTotal(model.tokens) },
           }))

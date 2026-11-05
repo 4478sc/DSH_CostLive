@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { buildReport, buildTimeRangeDataset } from '../src/report-data.mjs';
 import { renderLiveFragment } from '../src/live.mjs';
-import { aggregateRangeStats, formatDay, localMidnight } from '../src/time-range.mjs';
+import { aggregateDayStats, aggregateRangeStats, formatDay, localMidnight } from '../src/time-range.mjs';
 import {
   applyOfficialOverlay,
   officialWindowTotals,
@@ -212,6 +212,13 @@ test('the browser dataset carries USD through to the range summary', () => {
   assert.equal(stats.tokenPrice.cnyTokens, 0);
   assert.equal(stats.tokenPrice.usdTokens, 115);
   assert.ok(stats.tokenPrice.usdMicroPerM > 0);
+  // The daily (按天) view must classify the same rows the same way.
+  const dayModel = dataset.days.flatMap((day) => day.sessions).flatMap((session) => session.models).find((model) => model.priceKey === 'opencode-official');
+  assert.ok(dayModel, 'daily dataset keeps the official marker');
+  const dayStats = aggregateDayStats(dataset.days);
+  assert.equal(dayStats.tokenPrice.cnyTokens, 0);
+  assert.equal(dayStats.tokenPrice.usdTokens, 115);
+  assert.equal(dayStats.tokenPrice.usdMicroPerM, stats.tokenPrice.usdMicroPerM);
   assert.ok(report.summary.tokenPrice.usdMicroPerM > 0, 'summary carries the USD average');
 });
 

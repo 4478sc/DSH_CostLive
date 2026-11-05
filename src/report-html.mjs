@@ -1,6 +1,6 @@
 /** Self-contained HTML report. */
 import { activityLabel, sortSessionRecords } from './activity.mjs';
-import { formatMoney, formatUsd, sortCostMicro } from './money.mjs';
+import { averageTokenPrice, formatMoney, formatUsd, sortCostMicro } from './money.mjs';
 import { describePeakHours, formatCny, formatTokens } from './pricing.mjs';
 import { formatPercent, formatTime } from './format.mjs';
 import { buildTimeRangeDataset, modelCacheSavingMicro } from './report-data.mjs';
@@ -116,8 +116,9 @@ export function renderHtml(report) {
       : report.home;
   const models = aggregateModels(sessions, pricing);
   const billable = summary.inputTokens + summary.cacheWriteTokens + summary.cacheReadTokens;
-  const cacheSavingMicro = Math.round(models.reduce((sum, model) => sum + model.cacheSavingMicro, 0));
-  const cacheSavingMicroUsd = Math.round(models.reduce((sum, model) => sum + (model.cacheSavingMicroUsd ?? 0), 0));
+  // Average price of priced tokens only; CNY and USD stay separate columns.
+  const tokenPrice = averageTokenPrice(models);
+  const pricedTokenCount = tokenPrice.cnyTokens + tokenPrice.usdTokens;
   const pricedCount = summary.pricedSessions;
   const unpriced = summary.unpricedModels;
   // Every session is serialized into the page; the inline client filters this
@@ -506,9 +507,9 @@ export function renderHtml(report) {
       <div class="f" id="stat-cache-read-note">占计费输入 ${formatPercent(summary.cacheHit)}</div>
     </div>
     <div class="card">
-      <div class="k">缓存节省</div>
-      <div class="v" id="stat-cache-saving">${money(cacheSavingMicro, cacheSavingMicroUsd)}</div>
-      <div class="f">相对未缓存输入价估算</div>
+      <div class="k">Token均价</div>
+      <div class="v" id="stat-token-price">${money(tokenPrice.cnyMicroPerM, tokenPrice.usdMicroPerM)}</div>
+      <div class="f" id="stat-token-price-note">有价 token ${formatTokens(pricedTokenCount)} · 未定价不计</div>
     </div>
   </div>
 

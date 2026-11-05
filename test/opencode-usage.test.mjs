@@ -206,6 +206,13 @@ test('the browser dataset carries USD through to the range summary', () => {
   assert.equal(stats.costMicroUsd, 2_500_000, 'range summary keeps USD');
   assert.equal(stats.costMicroCny, 0);
   assert.equal(stats.cacheSavingMicroUsd, 16_000);
+  // The official marker must survive into the dataset, otherwise the browser
+  // would average official tokens into the CNY column.
+  assert.equal(dataset.sessions[0].models[0].priceKey, 'opencode-official');
+  assert.equal(stats.tokenPrice.cnyTokens, 0);
+  assert.equal(stats.tokenPrice.usdTokens, 115);
+  assert.ok(stats.tokenPrice.usdMicroPerM > 0);
+  assert.ok(report.summary.tokenPrice.usdMicroPerM > 0, 'summary carries the USD average');
 });
 
 test('live fragments carry a fresh dataset so cards do not freeze', () => {

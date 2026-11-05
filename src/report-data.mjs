@@ -1,7 +1,7 @@
 /** Machine-readable report builders: JSON and CSV. */
 import { isSubagentSession, projectionIsRunning, sortSessionRecords } from './activity.mjs';
 import { resolvePrice } from './pricing.mjs';
-import { sortCostMicro } from './money.mjs';
+import { averageTokenPrice, sortCostMicro } from './money.mjs';
 import { formatDay, localMidnight } from './time-range.mjs';
 
 /** Round a float for stable JSON output. */
@@ -290,6 +290,7 @@ export function buildTimeRangeDataset({ sessions, pricing, pageSize = 5, daily }
       const models = session.models.map((model) => ({
         provider: model.provider ?? null,
         model: model.model ?? null,
+        priceKey: model.priceKey ?? null,
         priced: model.priced === true,
         costMicroCny: model.costMicroCny,
         costMicroUsd: model.costMicroUsd ?? 0,
@@ -354,6 +355,7 @@ export function buildTimeRangeDataset({ sessions, pricing, pageSize = 5, daily }
         models: session.models.map((model) => ({
           provider: model.provider ?? null,
           model: model.model ?? null,
+          priceKey: model.priceKey ?? null,
           priced: model.priced === true,
           costMicroCny: model.costMicroCny,
           costMicroUsd: model.costMicroUsd ?? 0,
@@ -399,6 +401,14 @@ export function buildReport({ home, sources = [], pricing, results, generatedAt 
     },
   );
   const billedInput = summary.inputTokens + summary.cacheWriteTokens + summary.cacheReadTokens;
+  // Average price per 1M tokens over priced tokens only (CNY and USD apart).
+  const tokenPrice = averageTokenPrice(sessions.flatMap((session) => session.models));
+  summary.tokenPrice = {
+    cnyMicroPerM: tokenPrice.cnyMicroPerM,
+    usdMicroPerM: tokenPrice.usdMicroPerM,
+    cnyTokens: tokenPrice.cnyTokens,
+    usdTokens: tokenPrice.usdTokens,
+  };
   return {
     tool: 'dsh-cost',
     version: 1,

@@ -30,6 +30,47 @@ export function formatUsd(value) {
   return '$' + value.toFixed(digits);
 }
 
+/**
+ * Average price of one million tokens, split by currency.
+ *
+ * Only tokens that actually carry a price are counted: locally priced models
+ * contribute to the CNY average, official OpenCode rows to the USD one.
+ * Unpriced models (e.g. `gpt-6.1-sol`) and official usage still waiting for a
+ * console row (`opencode-pending`) are excluded from both the cost and the
+ * token count, so they cannot drag the average down.
+ *
+ * @returns {{cnyTokens:number, usdTokens:number, cnyMicroPerM:number, usdMicroPerM:number}}
+ */
+export function averageTokenPrice(models) {
+  let cnyTokens = 0;
+  let cnyMicro = 0;
+  let usdTokens = 0;
+  let usdMicro = 0;
+  for (const model of Array.isArray(models) ? models : []) {
+    if (model === null || model === undefined) continue;
+    const tokens = model.tokens ?? {};
+    const total =
+      (tokens.uncachedInputTokens || 0) +
+      (tokens.outputTokens || 0) +
+      (tokens.cacheWriteTokens || 0) +
+      (tokens.cacheReadTokens || 0);
+    if (total <= 0) continue;
+    if (model.priceKey === 'opencode-official') {
+      usdTokens += total;
+      usdMicro += model.costMicroUsd || 0;
+    } else if (model.priced === true) {
+      cnyTokens += total;
+      cnyMicro += model.costMicroCny || 0;
+    }
+  }
+  return {
+    cnyTokens,
+    usdTokens,
+    cnyMicroPerM: cnyTokens === 0 ? 0 : Math.round((cnyMicro * 1e6) / cnyTokens),
+    usdMicroPerM: usdTokens === 0 ? 0 : Math.round((usdMicro * 1e6) / usdTokens),
+  };
+}
+
 /** "￥12.3456", "$0.7891", or "￥12.3456+$0.7891" when both are non-zero. */
 export function formatMoney(microCny = 0, microUsd = 0) {
   const parts = [];

@@ -323,7 +323,8 @@ function makeDailyDom(days) {
     'stat-tokens-note',
     'stat-cache-read',
     'stat-cache-read-note',
-    'stat-cache-saving',
+    'stat-token-price',
+    'stat-token-price-note',
     'model-summary-body',
     'daily-empty',
   ]) {

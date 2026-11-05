@@ -11,7 +11,7 @@
  * `this`/`process`/`fs` references. Editing one of them changes both surfaces.
  */
 import { formatPercent } from './format.mjs';
-import { SORT_USD_TO_CNY, formatMoney, formatUsd, sortCostMicro } from './money.mjs';
+import { SORT_USD_TO_CNY, averageTokenPrice, formatMoney, formatUsd, sortCostMicro } from './money.mjs';
 import { formatCny, formatTokens } from './pricing.mjs';
 
 /** One day in milliseconds; `7d`/`30d` are rolling windows ending at `now`. */
@@ -234,6 +234,7 @@ export function aggregateRangeStats(sessions) {
   const billedInput = totals.uncachedInputTokens + totals.cacheWriteTokens + totals.cacheReadTokens;
   totals.cacheHit = billedInput === 0 ? null : Math.round((totals.cacheReadTokens / billedInput) * 10000) / 10000;
   totals.models = [...map.values()].sort((a, b) => sortCostMicro(b) - sortCostMicro(a));
+  totals.tokenPrice = averageTokenPrice(totals.models);
   return totals;
 }
 
@@ -355,6 +356,7 @@ export function aggregateDayStats(days) {
       sessions: Object.keys(entry.sessionIds).length,
     }))
     .sort((a, b) => sortCostMicro(b) - sortCostMicro(a));
+  totals.tokenPrice = averageTokenPrice(totals.models);
   return totals;
 }
 
@@ -500,7 +502,8 @@ function applyDailyView(doc, range, now, days) {
   setText(doc.getElementById('stat-tokens-note'), 'in ' + formatTokens(stats.uncachedInputTokens) + ' · out ' + formatTokens(stats.outputTokens));
   setText(doc.getElementById('stat-cache-read'), formatTokens(stats.cacheReadTokens));
   setText(doc.getElementById('stat-cache-read-note'), '占计费输入 ' + formatPercent(stats.cacheHit));
-  setText(doc.getElementById('stat-cache-saving'), formatMoney(stats.cacheSavingMicro, stats.cacheSavingMicroUsd));
+  setText(doc.getElementById('stat-token-price'), formatMoney(stats.tokenPrice.cnyMicroPerM, stats.tokenPrice.usdMicroPerM));
+  setText(doc.getElementById('stat-token-price-note'), '有价 token ' + formatTokens(stats.tokenPrice.cnyTokens + stats.tokenPrice.usdTokens) + ' · 未定价不计');
   renderModelTable(doc, stats.models);
 
   var empty = doc.getElementById('daily-empty');
@@ -603,7 +606,8 @@ function applyTimeRange(doc, options) {
     setText(doc.getElementById('stat-tokens-note'), 'in ' + formatTokens(stats.uncachedInputTokens) + ' · out ' + formatTokens(stats.outputTokens));
     setText(doc.getElementById('stat-cache-read'), formatTokens(stats.cacheReadTokens));
     setText(doc.getElementById('stat-cache-read-note'), '占计费输入 ' + formatPercent(stats.cacheHit));
-    setText(doc.getElementById('stat-cache-saving'), formatMoney(stats.cacheSavingMicro, stats.cacheSavingMicroUsd));
+    setText(doc.getElementById('stat-token-price'), formatMoney(stats.tokenPrice.cnyMicroPerM, stats.tokenPrice.usdMicroPerM));
+  setText(doc.getElementById('stat-token-price-note'), '有价 token ' + formatTokens(stats.tokenPrice.cnyTokens + stats.tokenPrice.usdTokens) + ' · 未定价不计');
     renderModelTable(doc, stats.models);
   }
 
@@ -715,6 +719,7 @@ export function timeRangeRuntimeSource() {
     zeroTokens,
     aggregateRangeStats,
     aggregateDayStats,
+    averageTokenPrice,
     sortCostMicro,
     formatCny,
     formatUsd,

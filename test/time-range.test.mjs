@@ -8,6 +8,7 @@ import {
   DAY_MS,
   TIME_RANGES,
   TIME_RANGE_STORAGE_KEY,
+  aggregateDayStats,
   aggregateRangeStats,
   filterSessionsByRange,
   formatDay,
@@ -136,6 +137,41 @@ test('formatRangeLabel / formatDay render stable local captions', () => {
 });
 
 /* ------------------------------------------------------------------- stats */
+
+test('token price averages only priced tokens and keeps CNY and USD apart', () => {
+  const tokens = { uncachedInputTokens: 1_000_000, outputTokens: 0, cacheWriteTokens: 0, cacheReadTokens: 0 };
+  const priced = { provider: 'p', model: 'local', priceKey: 'local', priced: true, costMicroCny: 2_000_000, costMicroUsd: 0, tokens };
+  const unpriced = { provider: 'p', model: 'gpt-6.1-sol', priceKey: null, priced: false, costMicroCny: 0, costMicroUsd: 0, tokens };
+  const official = { provider: 'opencode', model: 'deepseek-v4.1-flash', priceKey: 'opencode-official', priced: true, costMicroCny: 0, costMicroUsd: 3_000_000, tokens };
+  const sessions = [
+    { costMicroCny: 2_000_000, costMicroUsd: 0, tokens, models: [priced, unpriced] },
+    { costMicroCny: 0, costMicroUsd: 3_000_000, tokens, models: [official] },
+  ];
+  const stats = aggregateRangeStats(sessions);
+  // The unpriced model contributes to neither the cost nor the token count.
+  assert.equal(stats.tokenPrice.cnyTokens, 1_000_000);
+  assert.equal(stats.tokenPrice.usdTokens, 1_000_000);
+  assert.equal(stats.tokenPrice.cnyMicroPerM, 2_000_000);
+  assert.equal(stats.tokenPrice.usdMicroPerM, 3_000_000);
+
+  // The daily aggregator agrees with the session one.
+  const day = aggregateDayStats([
+    {
+      day: '2026-10-31',
+      dayStart: NOW,
+      totals: { ...tokens, totalTokens: 1_000_000, costMicroCny: 2_000_000, costMicroUsd: 0, samples: 2, cacheHit: 0 },
+      sessions: [{ id: 'a', uid: 'a', tokens, costMicroCny: 2_000_000, costMicroUsd: 0, models: [priced] }],
+    },
+    {
+      day: '2026-10-31',
+      dayStart: NOW,
+      totals: { ...tokens, totalTokens: 1_000_000, costMicroCny: 0, costMicroUsd: 3_000_000, samples: 1, cacheHit: 0 },
+      sessions: [{ id: 'b', uid: 'b', tokens, costMicroCny: 0, costMicroUsd: 3_000_000, models: [official] }],
+    },
+  ]);
+  assert.equal(day.tokenPrice.cnyMicroPerM, 2_000_000);
+  assert.equal(day.tokenPrice.usdMicroPerM, 3_000_000);
+});
 
 test('aggregateRangeStats mirrors the report summary arithmetic', () => {
   const aTokens = bucket(1000, 100, 20, 3000);
@@ -307,7 +343,8 @@ function makeDom(records, pageSize = 5) {
     'stat-tokens-note',
     'stat-cache-read',
     'stat-cache-read-note',
-    'stat-cache-saving',
+    'stat-token-price',
+    'stat-token-price-note',
     'model-summary-body',
   ]) {
     nodes.set(id, makeNode());
@@ -751,7 +788,8 @@ test('the generated page and the serialized runtime agree for every range', () =
     'stat-tokens-note',
     'stat-cache-read',
     'stat-cache-read-note',
-    'stat-cache-saving',
+    'stat-token-price',
+    'stat-token-price-note',
   ]) {
     assert.equal(dom.nodes.get(id).textContent, textOfId(id), `card ${id}`);
   }

@@ -22,6 +22,50 @@ function header(model) {
   return event('request/header', { header: { config: { provider: 'proxy', model } } });
 }
 
+const TIERED = normalizePricing({
+  models: {
+    'deepseek-v4.1-flash': {
+      input: 0.15,
+      output: 0.6,
+      cacheWrite: 0.15,
+      cacheRead: 0.003,
+      peak: { input: 0.3, output: 1.2, cacheWrite: 0.3, cacheRead: 0.006 },
+      peakHours: { timeZone: 'Asia/Shanghai', weekdays: [1, 2, 3, 4, 5], windows: ['09:00-12:00', '14:00-18:00'], holidays: [] },
+    },
+  },
+});
+
+test('two-tier models produce separate peak and off-peak rows', () => {
+  // 2026-10-26 is a Monday: 10:00 +08:00 is peak, 20:00 +08:00 is off-peak.
+  const peakTime = Date.parse('2026-10-26T02:00:00Z');
+  const offTime = Date.parse('2026-10-26T12:00:00Z');
+  const events = [
+    { type: 'model/selection', seq: 1, time: peakTime, data: { provider: 'proxy', model: 'deepseek-v4.1-flash' } },
+    { type: 'assistant/message', seq: 2, time: peakTime, data: { turn: 1, step: 1, usage: usage(1000000, 0) } },
+    { type: 'assistant/message', seq: 3, time: offTime, data: { turn: 1, step: 2, usage: usage(1000000, 0) } },
+  ];
+  const result = analyzeEvents(events, TIERED);
+  assert.equal(result.byModel.length, 2);
+  const peak = result.byModel.find((entry) => entry.tier === 'peak');
+  const off = result.byModel.find((entry) => entry.tier === 'off');
+  assert.ok(peak && off, 'both tiers present');
+  assert.equal(peak.costMicroCny, 300000);
+  assert.equal(off.costMicroCny, 150000);
+  assert.equal(peak.priceKey, off.priceKey);
+});
+
+test('official rows also carry the peak/off tier from the same windows', () => {
+  const peakTime = Date.parse('2026-10-26T02:00:00Z');
+  const events = [
+    { type: 'model/selection', seq: 1, time: peakTime, data: { provider: 'opencode', model: 'deepseek-v4.1-flash' } },
+    { type: 'assistant/message', seq: 2, time: peakTime, data: { turn: 1, step: 1, usage: usage(10, 1) } },
+  ];
+  const result = analyzeEvents(events, TIERED);
+  assert.equal(result.byModel.length, 1);
+  assert.equal(result.byModel[0].tier, 'peak');
+  assert.equal(result.byModel[0].priced, false);
+});
+
 test('final sample replaces the streaming sample of the same step', () => {
   seq = 0;
   const events = [

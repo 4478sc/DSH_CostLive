@@ -69,6 +69,73 @@ function crossMidnightReport() {
   return { results, report: buildReport({ home: 'F:\\test', pricing, results, generatedAt: NOW }) };
 }
 
+test('peak and off-peak rows stay separate and labelled in every view', () => {
+  const pricing = normalizePricing({
+    models: {
+      'deepseek-v4.1-flash': {
+        input: 0.15,
+        output: 0.6,
+        cacheWrite: 0.15,
+        cacheRead: 0.003,
+        peak: { input: 0.3, output: 1.2, cacheWrite: 0.3, cacheRead: 0.006 },
+        peakHours: { timeZone: 'Asia/Shanghai', weekdays: [1, 2, 3, 4, 5], windows: ['09:00-12:00', '14:00-18:00'], holidays: [] },
+      },
+    },
+  });
+  const buckets = { uncachedInputTokens: 1_000_000, outputTokens: 0, cacheWriteTokens: 0, cacheReadTokens: 0 };
+  const at = Date.parse('2026-10-26T02:00:00Z');
+  const record = (tier, costMicroUsd) => ({
+    time: at,
+    provider: 'opencode',
+    model: 'deepseek-v4.1-flash',
+    tier,
+    priceKey: 'opencode-official',
+    priced: true,
+    buckets: { ...buckets },
+    costMicroCny: 0,
+    costMicroUsd,
+  });
+  const model = (tier, costMicroUsd) => ({
+    provider: 'opencode',
+    model: 'deepseek-v4.1-flash',
+    tier,
+    priceKey: 'opencode-official',
+    priced: true,
+    tokens: { ...buckets },
+    costCny: 0,
+    costMicroCny: 0,
+    costUsd: costMicroUsd / 1e6,
+    costMicroUsd,
+    cacheSavingMicroUsd: 0,
+    share: costMicroUsd / 3_000_000,
+    samples: 1,
+  });
+  const analysis = {
+    records: [record('peak', 2_000_000), record('off', 1_000_000)],
+    totals: { tokens: { ...buckets, uncachedInputTokens: 2_000_000 }, totalTokens: 2_000_000, costMicroCny: 0, costCny: 0, costMicroUsd: 3_000_000, costUsd: 3, cacheHit: 0, samples: 2 },
+    byModel: [model('peak', 2_000_000), model('off', 1_000_000)],
+    byTurn: [],
+    unpricedModels: [],
+  };
+  const report = buildReport({
+    home: 'test',
+    sources: [],
+    pricing,
+    results: [{ meta: { id: 's1', title: 'split', createdAt: at, source: '主机' }, analysis }],
+    generatedAt: at + 1000,
+  });
+  const html = renderHtml(report);
+  assert.ok(html.includes('deepseek-v4.1-flash（峰值）'), 'summary table has the peak row');
+  assert.ok(html.includes('deepseek-v4.1-flash（谷值）'), 'summary table has the off-peak row');
+  // The session detail (and the daily detail) list the same two rows.
+  assert.ok(html.split('deepseek-v4.1-flash（峰值）').length > 2, 'session detail also splits');
+
+  const dataset = buildTimeRangeDataset({ sessions: report.sessions, pricing, daily: report.daily });
+  const dayModels = aggregateDayStats(dataset.days).models.filter((row) => row.model === 'deepseek-v4.1-flash');
+  assert.equal(dayModels.length, 2, '按天 view keeps peak and off-peak apart');
+  assert.deepEqual(dayModels.map((row) => row.tier).sort(), ['off', 'peak']);
+});
+
 test('buildDailyReport splits a session across local midnight without changing totals', () => {
   const { report } = crossMidnightReport();
   const days = report.daily.days;

@@ -8,7 +8,7 @@ const alignList = ['l', 'l', 'l', 'l', 'r', 'r', 'r', 'r', 'r'];
 
 /** One model label for compact rows: "claude-sonnet-5-5" or "claude-sonnet-5-5 +2". */
 function modelsLabel(analysis) {
-  const names = analysis.byModel.map((entry) => entry.model ?? 'unknown');
+  const names = analysis.byModel.map((entry) => (entry.model ?? 'unknown') + (entry.tier === 'peak' ? '（峰值）' : entry.tier === 'off' ? '（谷值）' : ''));
   if (names.length === 0) return '—';
   if (names.length === 1) return names[0];
   return `${names[0]} +${names.length - 1}`;
@@ -129,7 +129,7 @@ export function renderDetail(result, { pricing, steps = false }) {
     lines.push('', '按模型');
     const rows = analysis.byModel.map((entry) => [
       entry.provider ?? '—',
-      entry.model ?? 'unknown',
+      (entry.model ?? 'unknown') + (entry.tier === 'peak' ? '（峰值）' : entry.tier === 'off' ? '（谷值）' : ''),
       entry.priceKey === 'opencode-pending' ? '待官网' : (entry.priceKey ?? '未定价'),
       formatTokens(entry.tokens.uncachedInputTokens),
       formatTokens(entry.tokens.outputTokens),

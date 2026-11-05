@@ -35,17 +35,29 @@ function modelCostText(model) {
   return model.priced ? money(model.costMicroCny, model.costMicroUsd) : '未定价';
 }
 
+/**
+ * Display label for one model row. Two-tier models (DeepSeek peak/off-peak)
+ * are split into separate rows, so the tier is part of the name.
+ */
+export function modelLabel(model) {
+  const name = model?.model ?? 'unknown';
+  if (model?.tier === 'peak') return `${name}（峰值）`;
+  if (model?.tier === 'off') return `${name}（谷值）`;
+  return name;
+}
+
 /** Aggregate per-model totals across all sessions. */
 function aggregateModels(sessions, pricing) {
   const map = new Map();
   for (const session of sessions) {
     for (const model of session.models) {
-      const key = `${model.provider ?? '?'}\u0000${model.model ?? '?'}`;
+      const key = `${model.provider ?? '?'}\u0000${model.model ?? '?'}\u0000${model.tier ?? ''}`;
       let entry = map.get(key);
       if (entry === undefined) {
         entry = {
           provider: model.provider,
           model: model.model,
+          tier: model.tier ?? null,
           priceKey: model.priceKey,
           priced: model.priced,
           tokens: { uncachedInputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 },
@@ -152,7 +164,7 @@ export function renderHtml(report) {
   const modelRows = models
     .map(
       (model) => `<tr>
-        <td class="mono">${escapeHtml(model.model ?? 'unknown')}</td>
+        <td class="mono">${escapeHtml(modelLabel(model))}</td>
         <td class="muted">${escapeHtml(model.provider ?? '—')}</td>
         <td class="num">${formatTokens(model.tokens.uncachedInputTokens)}</td>
         <td class="num">${formatTokens(model.tokens.outputTokens)}</td>
@@ -182,13 +194,13 @@ export function renderHtml(report) {
       const modelChips = session.models
         .map(
           (model) =>
-            `<span class="chip ${model.priced ? '' : 'chip-warn'}">${escapeHtml(model.model ?? 'unknown')}</span>`,
+            `<span class="chip ${model.priced ? '' : 'chip-warn'}">${escapeHtml(modelLabel(model))}</span>`,
         )
         .join('');
       const detailModels = session.models
         .map(
           (model) => `<tr>
-            <td class="mono">${escapeHtml(model.model ?? 'unknown')}</td>
+            <td class="mono">${escapeHtml(modelLabel(model))}</td>
             <td class="muted">${escapeHtml(model.provider ?? '—')}</td>
             <td class="num">${formatTokens(model.tokens.uncachedInputTokens)}</td>
             <td class="num">${formatTokens(model.tokens.outputTokens)}</td>
@@ -243,7 +255,7 @@ export function renderHtml(report) {
           const chips = session.models
             .map(
               (model) =>
-                `<span class="chip ${model.priced ? '' : 'chip-warn'}">${escapeHtml(model.model ?? 'unknown')}</span>`,
+                `<span class="chip ${model.priced ? '' : 'chip-warn'}">${escapeHtml(modelLabel(model))}</span>`,
             )
             .join('');
           return `<tr>

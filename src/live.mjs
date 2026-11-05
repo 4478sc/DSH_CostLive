@@ -11,7 +11,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { sortSessionResults } from './activity.mjs';
 import { analyzeEvents } from './engine.mjs';
-import { loadPricing } from './pricing.mjs';
+import { loadPricing, priceTier, resolvePrice } from './pricing.mjs';
 import { buildReport } from './report-data.mjs';
 import { buildReportDataset, escapeHtml, renderHtml } from './report-html.mjs';
 import { discoverSessions, readSession } from './sessions.mjs';
@@ -191,10 +191,15 @@ export function collectLiveReport(options = {}) {
       enabled: options.official !== false && options.noOfficial !== true,
     });
     if (officialReport !== null) {
+      const tierOf = (model, at) => {
+        const resolved = resolvePrice(model, pricing);
+        return resolved === null ? null : priceTier(resolved.price, at);
+      };
       const stats = applyOfficialOverlay(filtered, {
         records: officialReport.records,
         providers: officialReport.config.providers,
         usdRates: officialReport.config.usdRates ?? {},
+        tierOf,
       });
       official = {
         store: officialReport.config.store,

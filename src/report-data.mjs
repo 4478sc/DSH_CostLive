@@ -51,6 +51,7 @@ export function sessionRecord({ meta, analysis, projection }) {
     models: analysis.byModel.map((entry) => ({
       provider: entry.provider,
       model: entry.model,
+      tier: entry.tier ?? null,
       priceKey: entry.priceKey,
       priced: entry.priced,
       tokens: { ...entry.tokens },
@@ -176,12 +177,13 @@ export function buildDailyReport(results, pricing) {
       session.tokens.cacheWriteTokens += buckets.cacheWriteTokens;
       session.tokens.cacheReadTokens += buckets.cacheReadTokens;
 
-      const modelKey = `${record.provider ?? '?'}\u0000${record.model ?? '?'}`;
+      const modelKey = `${record.provider ?? '?'}\u0000${record.model ?? '?'}\u0000${record.tier ?? ''}`;
       let model = session.models.get(modelKey);
       if (model === undefined) {
         model = {
           provider: record.provider ?? null,
           model: record.model ?? null,
+          tier: record.tier ?? null,
           priceKey: record.priceKey ?? null,
           priced: record.priced === true,
           costMicroCny: 0,
@@ -231,6 +233,7 @@ export function buildDailyReport(results, pricing) {
           .map((model) => ({
             provider: model.provider,
             model: model.model,
+            tier: model.tier ?? null,
             priceKey: model.priceKey ?? null,
             priced: model.priced,
             costMicroCny: model.costMicroCny,
@@ -291,6 +294,7 @@ export function buildTimeRangeDataset({ sessions, pricing, pageSize = 5, daily }
       const models = session.models.map((model) => ({
         provider: model.provider ?? null,
         model: model.model ?? null,
+        tier: model.tier ?? null,
         priceKey: model.priceKey ?? null,
         priced: model.priced === true,
         costMicroCny: model.costMicroCny,
@@ -356,6 +360,7 @@ export function buildTimeRangeDataset({ sessions, pricing, pageSize = 5, daily }
         models: session.models.map((model) => ({
           provider: model.provider ?? null,
           model: model.model ?? null,
+          tier: model.tier ?? null,
           priceKey: model.priceKey ?? null,
           priced: model.priced === true,
           costMicroCny: model.costMicroCny,

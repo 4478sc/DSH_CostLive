@@ -117,7 +117,7 @@ export function recordTokens(record) {
  * Build the same analysis object `analyzeEvents` returns, from official rows.
  * Costs stay in USD (\`costMicroUsd\`); nothing is converted to CNY here.
  */
-export function officialAnalysis(records, { usdRates = {} } = {}) {
+export function officialAnalysis(records, { usdRates = {}, tierOf = null } = {}) {
   /** Cache saving in micro-USD: cached tokens priced at full input minus cache rate. */
   const savingOf = (model, tokens) => {
     const rate = usdRates?.[model];
@@ -133,12 +133,16 @@ export function officialAnalysis(records, { usdRates = {} } = {}) {
     const costMicroUsd = Math.round(record.costUsd * 1e6);
     addBuckets(totalsBuckets, record.tokens);
     totalMicroUsd += costMicroUsd;
-    const key = `${record.provider ?? '?'}\u0000${record.model ?? '?'}`;
+    // Peak/off split uses the sample's own completion time, like the CNY path.
+    const at = record.finishedAt ?? record.startedAt;
+    const tier = typeof tierOf === 'function' ? tierOf(record.model, at) : null;
+    const key = `${record.provider ?? '?'}\u0000${record.model ?? '?'}\u0000${tier ?? ''}`;
     let model = models.get(key);
     if (model === undefined) {
       model = {
         provider: record.provider,
         model: record.model,
+        tier,
         priceKey: 'opencode-official',
         priced: true,
         tokens: zeroBuckets(),
@@ -170,6 +174,7 @@ export function officialAnalysis(records, { usdRates = {} } = {}) {
     time: record.finishedAt ?? record.startedAt,
     provider: record.provider,
     model: record.model,
+    tier: typeof tierOf === 'function' ? tierOf(record.model, record.finishedAt ?? record.startedAt) : null,
     priceKey: 'opencode-official',
     priced: true,
     buckets: { ...record.tokens },
@@ -213,7 +218,7 @@ function providerAllowed(provider, providers) {
  * official rows and whose local models all belong to the official provider set.
  * Mixed sessions (e.g. DeepSeek next to Claude in one session) are left alone.
  */
-export function applyOfficialOverlay(results, { records, providers = DEFAULT_PROVIDERS, usdRates = {} } = {}) {
+export function applyOfficialOverlay(results, { records, providers = DEFAULT_PROVIDERS, usdRates = {}, tierOf = null } = {}) {
   const bySession = groupBySession(records ?? []);
   const stats = { applied: 0, skippedMixed: 0, sessions: bySession.size, records: (records ?? []).length, costUsd: 0 };
   for (const result of results) {
@@ -227,7 +232,7 @@ export function applyOfficialOverlay(results, { records, providers = DEFAULT_PRO
       continue;
     }
     result.localAnalysis ??= result.analysis;
-    result.analysis = officialAnalysis(rows, { usdRates });
+    result.analysis = officialAnalysis(rows, { usdRates, tierOf });
     result.official = result.analysis.official;
     if (result.meta && typeof result.meta === 'object') result.meta.official = true;
     result.meta.officialCostUsd = rows.reduce((sum, record) => sum + record.costUsd, 0);

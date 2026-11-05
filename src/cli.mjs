@@ -5,7 +5,7 @@ import { dirname, resolve } from 'node:path';
 import { sortSessionResults } from './activity.mjs';
 import { analyzeEvents } from './engine.mjs';
 import { formatMoney } from './money.mjs';
-import { loadPricing, formatCny } from './pricing.mjs';
+import { loadPricing, formatCny, priceTier, resolvePrice } from './pricing.mjs';
 import { buildReport, toCsv } from './report-data.mjs';
 import { renderHtml } from './report-html.mjs';
 import { renderDetail, renderList, renderModels, verifyProjection } from './report-text.mjs';
@@ -292,10 +292,15 @@ export function main(argv = process.argv.slice(2)) {
         enabled: options['no-official'] !== true,
       });
       if (officialReport !== null) {
+        const tierOf = (model, at) => {
+          const resolved = resolvePrice(model, pricing);
+          return resolved === null ? null : priceTier(resolved.price, at);
+        };
         const stats = applyOfficialOverlay(results, {
           records: officialReport.records,
           providers: officialReport.config.providers,
           usdRates: officialReport.config.usdRates ?? {},
+          tierOf,
         });
         official = {
           store: officialReport.config.store,

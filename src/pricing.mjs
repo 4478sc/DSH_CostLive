@@ -284,6 +284,17 @@ export function isPeak(price, timeMs) {
   );
 }
 
+/**
+ * Tier of one sample for a two-tier price: 'peak' / 'off'.
+ *
+ * Returns null for flat prices, so models without a peak tier keep one row in
+ * the per-model summary (only DeepSeek's two-tier entries are split).
+ */
+export function priceTier(price, timeMs) {
+  if (price === null || price === undefined || price.peak === undefined) return null;
+  return isPeak(price, timeMs) ? 'peak' : 'off';
+}
+
 /** The four rates that apply to one sample under one price entry. */
 export function priceAt(price, timeMs) {
   const source = isPeak(price, timeMs) ? price.peak : price;

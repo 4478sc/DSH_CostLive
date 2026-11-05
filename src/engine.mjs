@@ -12,7 +12,7 @@
  * Record semantics make the totals exact without delta subtraction: one record
  * per billed attempt; a replacement overwrites its record; a retry appends.
  */
-import { addBuckets, billedInputTokens, costMicroCny, isOfficialProvider, resolvePrice, zeroBuckets } from './pricing.mjs';
+import { addBuckets, billedInputTokens, costMicroCny, isOfficialProvider, priceTier, resolvePrice, zeroBuckets } from './pricing.mjs';
 
 /** The last provider usage sample embedded in an assistant settlement's stream. */
 export function usageFromEvent(event) {
@@ -102,7 +102,8 @@ export function analyzeEvents(events, pricing) {
         // opencode/opencode-go is billed by the OpenCode console: its cost only
         // exists as official USD rows, so the CNY table must stay out of it.
         const officialProvider = isOfficialProvider(active.provider);
-        const resolved = officialProvider ? null : resolvePrice(active.model, pricing);
+        const lookup = resolvePrice(active.model, pricing);
+        const resolved = officialProvider ? null : lookup;
         const record = {
           seq: event.seq,
           time: event.time,
@@ -112,6 +113,9 @@ export function analyzeEvents(events, pricing) {
           model: active.model,
           priceKey: officialProvider ? 'opencode-pending' : (resolved?.key ?? null),
           priced: resolved !== null,
+          // Peak/off split for two-tier models. Official rows have no CNY price,
+          // so the lookup is only used to know whether the model is tiered.
+          tier: priceTier(lookup?.price ?? null, event.time),
           officialProvider,
           buckets,
           // `event.time` selects the tier: two-tier models (DeepSeek) bill
@@ -141,12 +145,13 @@ export function analyzeEvents(events, pricing) {
   for (const record of billed) {
     addBuckets(totalsBuckets, record.buckets);
     totalMicro += record.costMicroCny;
-    const modelKey = `${record.provider ?? '?'}\u0000${record.model ?? '?'}`;
+    const modelKey = `${record.provider ?? '?'}\u0000${record.model ?? '?'}\u0000${record.tier ?? ''}`;
     let modelEntry = models.get(modelKey);
     if (modelEntry === undefined) {
       modelEntry = {
         provider: record.provider,
         model: record.model,
+        tier: record.tier ?? null,
         priceKey: record.priceKey,
         priced: record.priced,
         officialProvider: record.officialProvider === true,

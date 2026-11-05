@@ -204,12 +204,13 @@ export function aggregateRangeStats(sessions) {
     const models = Array.isArray(session.models) ? session.models : [];
     for (let modelIndex = 0; modelIndex < models.length; modelIndex += 1) {
       const model = models[modelIndex] ?? {};
-      const key = `${model.provider ?? '?'}\u0000${model.model ?? '?'}`;
+      const key = `${model.provider ?? '?'}\u0000${model.model ?? '?'}\u0000${model.tier ?? ''}`;
       let entry = map.get(key);
       if (entry === undefined) {
         entry = {
           provider: model.provider ?? null,
           model: model.model ?? null,
+          tier: model.tier ?? null,
           priceKey: model.priceKey ?? null,
           priced: model.priced === true,
           tokens: zeroTokens(),
@@ -305,12 +306,13 @@ export function aggregateDayStats(days) {
       const models = Array.isArray(session.models) ? session.models : [];
       for (let modelIndex = 0; modelIndex < models.length; modelIndex += 1) {
         const model = models[modelIndex] ?? {};
-        const key = `${model.provider ?? '?'}\u0000${model.model ?? '?'}`;
+        const key = `${model.provider ?? '?'}\u0000${model.model ?? '?'}\u0000${model.tier ?? ''}`;
         let entry = modelMap.get(key);
         if (entry === undefined) {
           entry = {
             provider: model.provider ?? null,
             model: model.model ?? null,
+            tier: model.tier ?? null,
             priceKey: model.priceKey ?? null,
             priced: model.priced === true,
             tokens: zeroTokens(),
@@ -346,6 +348,7 @@ export function aggregateDayStats(days) {
     .map((entry) => ({
       provider: entry.provider,
       model: entry.model,
+      tier: entry.tier ?? null,
       priceKey: entry.priceKey,
       priced: entry.priced,
       tokens: entry.tokens,
@@ -405,8 +408,11 @@ function renderModelTable(doc, models) {
   for (var index = 0; index < models.length; index += 1) {
     var model = models[index];
     var tokens = model.tokens || {};
+    var modelName = model.model === null || model.model === undefined ? 'unknown' : model.model;
+    if (model.tier === 'peak') modelName = modelName + '（峰值）';
+    else if (model.tier === 'off') modelName = modelName + '（谷值）';
     html += '<tr>' +
-      '<td class="mono">' + escapeHtml(model.model === null || model.model === undefined ? 'unknown' : model.model) + '</td>' +
+      '<td class="mono">' + escapeHtml(modelName) + '</td>' +
       '<td class="muted">' + escapeHtml(model.provider === null || model.provider === undefined ? '—' : model.provider) + '</td>' +
       '<td class="num">' + formatTokens(tokens.uncachedInputTokens || 0) + '</td>' +
       '<td class="num">' + formatTokens(tokens.outputTokens || 0) + '</td>' +

@@ -1,7 +1,7 @@
 /** Self-contained HTML report. */
 import { activityLabel, sortSessionRecords } from './activity.mjs';
 import { averageTokenPrice, formatMoney, formatUsd, sortCostMicro } from './money.mjs';
-import { describePeakHours, formatCny, formatTokens } from './pricing.mjs';
+import { canonicalProvider, describePeakHours, formatCny, formatTokens } from './pricing.mjs';
 import { formatPercent, formatTime } from './format.mjs';
 import { buildTimeRangeDataset, modelCacheSavingMicro } from './report-data.mjs';
 import { formatDay, formatRangeLabel, timeRangeRuntimeSource } from './time-range.mjs';
@@ -51,11 +51,12 @@ function aggregateModels(sessions, pricing) {
   const map = new Map();
   for (const session of sessions) {
     for (const model of session.models) {
-      const key = `${model.provider ?? '?'}\u0000${model.model ?? '?'}\u0000${model.tier ?? ''}`;
+      const provider = canonicalProvider(model.provider);
+      const key = `${provider ?? '?'}\u0000${model.model ?? '?'}\u0000${model.tier ?? ''}`;
       let entry = map.get(key);
       if (entry === undefined) {
         entry = {
-          provider: model.provider,
+          provider,
           model: model.model,
           tier: model.tier ?? null,
           priceKey: model.priceKey,
@@ -68,6 +69,10 @@ function aggregateModels(sessions, pricing) {
           sessions: new Set(),
         };
         map.set(key, entry);
+      }
+      if (model.priceKey === 'opencode-official' && entry.priceKey !== 'opencode-official') {
+        entry.priceKey = 'opencode-official';
+        entry.priced = true;
       }
       entry.tokens.uncachedInputTokens += model.tokens.uncachedInputTokens;
       entry.tokens.outputTokens += model.tokens.outputTokens;

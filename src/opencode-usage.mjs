@@ -14,7 +14,7 @@
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, resolve } from 'node:path';
-import { OFFICIAL_PROVIDERS, addBuckets, billedInputTokens, zeroBuckets } from './pricing.mjs';
+import { OFFICIAL_PROVIDERS, addBuckets, billedInputTokens, canonicalProvider, zeroBuckets } from './pricing.mjs';
 
 export const OFFICIAL_STORE_VERSION = 1;
 export const DEFAULT_PROVIDERS = [...OFFICIAL_PROVIDERS];
@@ -136,11 +136,12 @@ export function officialAnalysis(records, { usdRates = {}, tierOf = null } = {})
     // Peak/off split uses the sample's own completion time, like the CNY path.
     const at = record.finishedAt ?? record.startedAt;
     const tier = typeof tierOf === 'function' ? tierOf(record.model, at) : null;
-    const key = `${record.provider ?? '?'}\u0000${record.model ?? '?'}\u0000${tier ?? ''}`;
+    const provider = canonicalProvider(record.provider);
+    const key = `${provider ?? '?'}\u0000${record.model ?? '?'}\u0000${tier ?? ''}`;
     let model = models.get(key);
     if (model === undefined) {
       model = {
-        provider: record.provider,
+        provider,
         model: record.model,
         tier,
         priceKey: 'opencode-official',
@@ -172,7 +173,7 @@ export function officialAnalysis(records, { usdRates = {}, tierOf = null } = {})
     // Billed at completion: the console's day buckets follow the finish time,
     // so use it to keep per-day totals aligned with opencode.ai.
     time: record.finishedAt ?? record.startedAt,
-    provider: record.provider,
+    provider: canonicalProvider(record.provider),
     model: record.model,
     tier: typeof tierOf === 'function' ? tierOf(record.model, record.finishedAt ?? record.startedAt) : null,
     priceKey: 'opencode-official',

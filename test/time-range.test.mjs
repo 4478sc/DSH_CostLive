@@ -138,6 +138,37 @@ test('formatRangeLabel / formatDay render stable local captions', () => {
 
 /* ------------------------------------------------------------------- stats */
 
+test('opencode and opencode-go fold into a single provider row', () => {
+  const tokens = { uncachedInputTokens: 1000, outputTokens: 100, cacheWriteTokens: 0, cacheReadTokens: 0 };
+  const official = (provider, costMicroUsd) => ({ provider, model: 'deepseek-v4.1-flash', tier: 'peak', priceKey: 'opencode-official', priced: true, costMicroCny: 0, costMicroUsd, tokens });
+  const pending = { provider: 'opencode-go', model: 'deepseek-v4.1-flash', tier: 'peak', priceKey: 'opencode-pending', priced: false, costMicroCny: 0, costMicroUsd: 0, tokens };
+  const sessions = [
+    { costMicroCny: 0, costMicroUsd: 2_000_000, tokens, models: [pending] },
+    { costMicroCny: 0, costMicroUsd: 2_000_000, tokens, models: [official('opencode', 2_000_000)] },
+  ];
+  const stats = aggregateRangeStats(sessions);
+  assert.equal(stats.models.length, 1, 'one row for both routes');
+  assert.equal(stats.models[0].provider, 'opencode');
+  assert.equal(stats.models[0].tokens.uncachedInputTokens, 2000);
+  assert.equal(stats.models[0].costMicroUsd, 2_000_000);
+  assert.equal(stats.models[0].priceKey, 'opencode-official', 'the official marker wins over 「待官网」');
+
+  const day = aggregateDayStats([
+    {
+      day: '2026-10-31',
+      dayStart: NOW,
+      totals: { ...tokens, totalTokens: 1100, costMicroCny: 0, costMicroUsd: 2_000_000, samples: 2, cacheHit: 0 },
+      sessions: [
+        { id: 'a', uid: 'a', tokens, costMicroCny: 0, costMicroUsd: 2_000_000, models: [pending] },
+        { id: 'b', uid: 'b', tokens, costMicroCny: 0, costMicroUsd: 0, models: [official('opencode-go', 0)] },
+      ],
+    },
+  ]);
+  assert.equal(day.models.length, 1);
+  assert.equal(day.models[0].provider, 'opencode');
+  assert.equal(day.models[0].tokens.uncachedInputTokens, 2000);
+});
+
 test('token price averages only priced tokens and keeps CNY and USD apart', () => {
   const tokens = { uncachedInputTokens: 1_000_000, outputTokens: 0, cacheWriteTokens: 0, cacheReadTokens: 0 };
   const priced = { provider: 'p', model: 'local', priceKey: 'local', priced: true, costMicroCny: 2_000_000, costMicroUsd: 0, tokens };

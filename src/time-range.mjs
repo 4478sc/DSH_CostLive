@@ -12,7 +12,7 @@
  */
 import { formatPercent } from './format.mjs';
 import { SORT_USD_TO_CNY, averageTokenPrice, formatMoney, formatUsd, sortCostMicro } from './money.mjs';
-import { formatCny, formatTokens } from './pricing.mjs';
+import { canonicalProvider, formatCny, formatTokens } from './pricing.mjs';
 
 /** One day in milliseconds; `7d`/`30d` are rolling windows ending at `now`. */
 export const DAY_MS = 86_400_000;
@@ -204,11 +204,12 @@ export function aggregateRangeStats(sessions) {
     const models = Array.isArray(session.models) ? session.models : [];
     for (let modelIndex = 0; modelIndex < models.length; modelIndex += 1) {
       const model = models[modelIndex] ?? {};
-      const key = `${model.provider ?? '?'}\u0000${model.model ?? '?'}\u0000${model.tier ?? ''}`;
+      const provider = canonicalProvider(model.provider);
+      const key = `${provider ?? '?'}\u0000${model.model ?? '?'}\u0000${model.tier ?? ''}`;
       let entry = map.get(key);
       if (entry === undefined) {
         entry = {
-          provider: model.provider ?? null,
+          provider,
           model: model.model ?? null,
           tier: model.tier ?? null,
           priceKey: model.priceKey ?? null,
@@ -220,6 +221,10 @@ export function aggregateRangeStats(sessions) {
           sessions: 0,
         };
         map.set(key, entry);
+      }
+      if (model.priceKey === 'opencode-official' && entry.priceKey !== 'opencode-official') {
+        entry.priceKey = 'opencode-official';
+        entry.priced = true;
       }
       const modelTokens = model.tokens ?? {};
       entry.tokens.uncachedInputTokens += modelTokens.uncachedInputTokens || 0;
@@ -306,11 +311,12 @@ export function aggregateDayStats(days) {
       const models = Array.isArray(session.models) ? session.models : [];
       for (let modelIndex = 0; modelIndex < models.length; modelIndex += 1) {
         const model = models[modelIndex] ?? {};
-        const key = `${model.provider ?? '?'}\u0000${model.model ?? '?'}\u0000${model.tier ?? ''}`;
+        const provider = canonicalProvider(model.provider);
+        const key = `${provider ?? '?'}\u0000${model.model ?? '?'}\u0000${model.tier ?? ''}`;
         let entry = modelMap.get(key);
         if (entry === undefined) {
           entry = {
-            provider: model.provider ?? null,
+            provider,
             model: model.model ?? null,
             tier: model.tier ?? null,
             priceKey: model.priceKey ?? null,
@@ -323,6 +329,10 @@ export function aggregateDayStats(days) {
             sessionIds: Object.create(null),
           };
           modelMap.set(key, entry);
+        }
+        if (model.priceKey === 'opencode-official' && entry.priceKey !== 'opencode-official') {
+          entry.priceKey = 'opencode-official';
+          entry.priced = true;
         }
         const modelTokens = model.tokens ?? {};
         entry.tokens.uncachedInputTokens += modelTokens.uncachedInputTokens || 0;
@@ -726,6 +736,7 @@ export function timeRangeRuntimeSource() {
     aggregateRangeStats,
     aggregateDayStats,
     averageTokenPrice,
+    canonicalProvider,
     sortCostMicro,
     formatCny,
     formatUsd,

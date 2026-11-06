@@ -12,7 +12,7 @@
  * Record semantics make the totals exact without delta subtraction: one record
  * per billed attempt; a replacement overwrites its record; a retry appends.
  */
-import { addBuckets, billedInputTokens, costMicroCny, isOfficialProvider, priceTier, resolvePrice, zeroBuckets } from './pricing.mjs';
+import { addBuckets, billedInputTokens, canonicalProvider, costMicroCny, isOfficialProvider, priceTier, resolvePrice, zeroBuckets } from './pricing.mjs';
 
 /** The last provider usage sample embedded in an assistant settlement's stream. */
 export function usageFromEvent(event) {
@@ -145,11 +145,12 @@ export function analyzeEvents(events, pricing) {
   for (const record of billed) {
     addBuckets(totalsBuckets, record.buckets);
     totalMicro += record.costMicroCny;
-    const modelKey = `${record.provider ?? '?'}\u0000${record.model ?? '?'}\u0000${record.tier ?? ''}`;
+    const modelProvider = canonicalProvider(record.provider);
+    const modelKey = `${modelProvider ?? '?'}\u0000${record.model ?? '?'}\u0000${record.tier ?? ''}`;
     let modelEntry = models.get(modelKey);
     if (modelEntry === undefined) {
       modelEntry = {
-        provider: record.provider,
+        provider: modelProvider,
         model: record.model,
         tier: record.tier ?? null,
         priceKey: record.priceKey,

@@ -71,6 +71,20 @@ export const DEFAULT_PRICING = Object.freeze({
  */
 export const OFFICIAL_PROVIDERS = Object.freeze(['opencode', 'opencode-go']);
 
+/**
+ * Canonical provider used for grouping and display.
+ *
+ * `opencode-go` is the same service as `opencode` (same models, same console
+ * bill), and DSH writes whichever route the request took. Folding both into
+ * `opencode` keeps one row per model instead of two near-identical ones.
+ */
+export function canonicalProvider(provider) {
+  if (typeof provider !== 'string') return provider ?? null;
+  const value = provider.trim().toLowerCase();
+  if (value === 'opencode' || value === 'opencode-go') return 'opencode';
+  return provider;
+}
+
 /** True when the provider is billed by the official OpenCode console. */
 export function isOfficialProvider(provider) {
   if (typeof provider !== 'string' || provider === '') return false;

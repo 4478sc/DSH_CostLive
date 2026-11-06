@@ -1,6 +1,6 @@
 /** Machine-readable report builders: JSON and CSV. */
 import { isSubagentSession, projectionIsRunning, sortSessionRecords } from './activity.mjs';
-import { resolvePrice } from './pricing.mjs';
+import { canonicalProvider, resolvePrice } from './pricing.mjs';
 import { averageTokenPrice, sortCostMicro } from './money.mjs';
 import { formatDay, localMidnight } from './time-range.mjs';
 
@@ -177,11 +177,12 @@ export function buildDailyReport(results, pricing) {
       session.tokens.cacheWriteTokens += buckets.cacheWriteTokens;
       session.tokens.cacheReadTokens += buckets.cacheReadTokens;
 
-      const modelKey = `${record.provider ?? '?'}\u0000${record.model ?? '?'}\u0000${record.tier ?? ''}`;
+      const modelProvider = canonicalProvider(record.provider);
+      const modelKey = `${modelProvider ?? '?'}\u0000${record.model ?? '?'}\u0000${record.tier ?? ''}`;
       let model = session.models.get(modelKey);
       if (model === undefined) {
         model = {
-          provider: record.provider ?? null,
+          provider: modelProvider,
           model: record.model ?? null,
           tier: record.tier ?? null,
           priceKey: record.priceKey ?? null,
@@ -193,6 +194,12 @@ export function buildDailyReport(results, pricing) {
           tokens: emptyTokens(),
         };
         session.models.set(modelKey, model);
+      }
+      // A group can hold both official and still-pending rows; the official
+      // marker wins so the row shows money instead of 「待官网」.
+      if (record.priceKey === 'opencode-official' && model.priceKey !== 'opencode-official') {
+        model.priceKey = 'opencode-official';
+        model.priced = true;
       }
       model.costMicroCny += record.costMicroCny ?? 0;
       model.costMicroUsd += record.costMicroUsd ?? 0;

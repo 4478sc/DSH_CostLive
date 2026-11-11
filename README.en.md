@@ -48,7 +48,7 @@ collect / price / render code as the report, so page numbers always match the CL
 | Per-day view | "By session / By day"; the by-day view buckets each sample by its own time, splitting midnight-crossing sessions in two, so it answers "how much did today actually cost" |
 | Running first | Running main sessions → running subagents → finished (cost descending); running rows are highlighted with a pulsing label; a step with no update for 2 hours counts as abandoned (a killed DSH leaves an `openStep` behind) |
 | First 5 rows | Only five rows on first paint, then "show more (N left)"; the expansion state survives refreshes and filters |
-| Per-model summary | Four token buckets, cost and share per provider/model; unpriced models are flagged; two-tier models (DeepSeek) are split into peak/off-peak rows |
+| Per-model summary | Four token buckets, cost, **average price per 1M tokens** and share per provider/model; unpriced models are flagged; two-tier models (DeepSeek) are split into peak/off-peak rows |
 | Peak/off-peak pricing | `deepseek-v4.1-flash` picks its tier from **each sample's own timestamp** on weekdays, and a session that crosses the boundary is priced in two parts; summary, session detail and daily detail all show the "（峰值）/（谷值）" rows |
 | Cache and unit price | Cache hit rate and cache-read volume; "Token均价" (price per million tokens) only counts priced tokens, keeps CNY and USD apart and ignores unpriced models |
 | Three modes | Local HTTP server (recommended), `file:///` with a background rebuild, one-shot static snapshot |

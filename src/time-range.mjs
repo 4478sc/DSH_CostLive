@@ -259,7 +259,15 @@ export function aggregateRangeStats(sessions) {
   }
   const billedInput = totals.uncachedInputTokens + totals.cacheWriteTokens + totals.cacheReadTokens;
   totals.cacheHit = billedInput === 0 ? null : Math.round((totals.cacheReadTokens / billedInput) * 10000) / 10000;
-  totals.models = [...map.values()].sort((a, b) => sortCostMicro(b) - sortCostMicro(a));
+  totals.models = [...map.values()]
+    .map(function (entry) {
+      // Per-model average price: same rule as the card, applied to one row.
+      entry.tokenPrice = averageTokenPrice([entry]);
+      return entry;
+    })
+    .sort(function (a, b) {
+      return sortCostMicro(b) - sortCostMicro(a);
+    });
   totals.tokenPrice = averageTokenPrice(totals.models);
   return totals;
 }
@@ -388,6 +396,10 @@ export function aggregateDayStats(days) {
       cacheSavingMicroUsd: entry.cacheSavingMicroUsd,
       sessions: Object.keys(entry.sessionIds).length,
     }))
+    .map((entry) => {
+      entry.tokenPrice = averageTokenPrice([entry]);
+      return entry;
+    })
     .sort((a, b) => sortCostMicro(b) - sortCostMicro(a));
   totals.tokenPrice = averageTokenPrice(totals.models);
   return totals;
@@ -436,7 +448,7 @@ function renderModelTable(doc, models, messages) {
   var body = doc.getElementById('model-summary-body');
   if (!body) return;
   if (!models || models.length === 0) {
-    body.innerHTML = '<tr><td colspan="8" class="muted" style="padding:20px">' + (uiText(messages, 'empty.usage') || '没有用量记录') + '</td></tr>';
+    body.innerHTML = '<tr><td colspan="9" class="muted" style="padding:20px">' + (uiText(messages, 'empty.usage') || '没有用量记录') + '</td></tr>';
     return;
   }
   var html = '';
@@ -454,6 +466,7 @@ function renderModelTable(doc, models, messages) {
       '<td class="num">' + formatTokens(tokens.cacheWriteTokens || 0) + '</td>' +
       '<td class="num">' + formatTokens(tokens.cacheReadTokens || 0) + '</td>' +
       '<td class="num strong">' + (model.priceKey === 'opencode-pending' ? (uiText(messages, 'cost.pending') || '待官网') : (model.priced ? formatMoney(model.costMicroCny, model.costMicroUsd) : (uiText(messages, 'cost.unpriced') || '未定价'))) + '</td>' +
+      '<td class="num">' + (model.priced && model.tokenPrice ? formatMoney(model.tokenPrice.cnyMicroPerM, model.tokenPrice.usdMicroPerM) : (uiText(messages, 'cost.unpriced') || '未定价')) + '</td>' +
       '<td class="num muted">' + model.sessions + '</td>' +
       '</tr>';
   }

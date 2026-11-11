@@ -89,7 +89,9 @@ function aggregateModels(sessions, pricing) {
       entry.sessions.add(session.id);
     }
   }
-  return [...map.values()].sort((a, b) => sortCostMicro(b) - sortCostMicro(a));
+  return [...map.values()]
+    .map((entry) => ({ ...entry, tokenPrice: averageTokenPrice([entry]) }))
+    .sort((a, b) => sortCostMicro(b) - sortCostMicro(a));
 }
 
 /**
@@ -196,6 +198,7 @@ export function renderHtml(report, options = {}) {
         <td class="num">${formatTokens(model.tokens.cacheWriteTokens)}</td>
         <td class="num">${formatTokens(model.tokens.cacheReadTokens)}</td>
         <td class="num strong">${modelCostText(model, tr)}</td>
+        <td class="num">${model.priced && model.tokenPrice ? money(model.tokenPrice.cnyMicroPerM, model.tokenPrice.usdMicroPerM) : tr('cost.unpriced')}</td>
         <td class="num muted">${model.sessions.size}</td>
       </tr>`,
     )
@@ -584,9 +587,9 @@ export function renderHtml(report, options = {}) {
     <div class="table-wrap">
       <table>
         <thead>
-          <tr><th>${tr('table.model')}</th><th>${tr('table.provider')}</th><th class="num">${tr('table.input')}</th><th class="num">${tr('table.output')}</th><th class="num">${tr('table.cacheWrite')}</th><th class="num">${tr('table.cacheRead')}</th><th class="num">${tr('table.cost')}</th><th class="num">${tr('table.sessions')}</th></tr>
+          <tr><th>${tr('table.model')}</th><th>${tr('table.provider')}</th><th class="num">${tr('table.input')}</th><th class="num">${tr('table.output')}</th><th class="num">${tr('table.cacheWrite')}</th><th class="num">${tr('table.cacheRead')}</th><th class="num">${tr('table.cost')}</th><th class="num">${tr('table.tokenPrice')}</th><th class="num">${tr('table.sessions')}</th></tr>
         </thead>
-        <tbody id="model-summary-body">${modelRows || `<tr><td colspan="8" class="muted" style="padding:20px">${tr('empty.usage')}</td></tr>`}</tbody>
+        <tbody id="model-summary-body">${modelRows || `<tr><td colspan="9" class="muted" style="padding:20px">${tr('empty.usage')}</td></tr>`}</tbody>
       </table>
     </div>
   </section>

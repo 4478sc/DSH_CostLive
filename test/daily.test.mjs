@@ -257,6 +257,13 @@ test('renderHtml embeds the daily view, toggle, and split buckets', () => {
   assert.match(html, /view-btn/u);
 });
 
+test('renderHtml shows a per-model Token均价 column', () => {
+  const { report } = crossMidnightReport();
+  const html = renderHtml(report);
+  assert.match(html, /<th class="num">Token均价<\/th>/u);
+  assert.match(html, /claude-sonnet-5-5<\/td>\s*<td class="muted">[^<]*<\/td>[\s\S]*?<td class="num">[^<]*<\/td>\s*<td class="num muted">/u);
+});
+
 test('applyTimeRange in daily mode filters days by sample date and updates cards', () => {
   const { report } = crossMidnightReport();
   const dataset = buildTimeRangeDataset({ sessions: [], daily: report.daily, pricing });

@@ -36,6 +36,7 @@
     "live:demo": "node bin/dsh-cost-live.mjs --home demo-home",
     "live:once": "node bin/dsh-cost-live.mjs --once",
     "live:watch": "node bin/dsh-cost-live.mjs --watch",
-    "report": "node bin/dsh-cost.mjs report --format html --out out/dsh-cost-report.html"
+    "report": "node bin/dsh-cost.mjs report --format html --out out/dsh-cost-report.html",
+    "check:readme": "node tools/check-readme-parity.mjs"
   }
 }

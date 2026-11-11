@@ -30,3 +30,14 @@ jobs:
         run: node --version
       - name: Run tests
         run: ${{ matrix.command }}
+
+  readme:
+    name: readme parity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: README.md and README.en.md must have the same sections
+        run: npm run check:readme

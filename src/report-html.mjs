@@ -770,6 +770,16 @@ ${billingClientSource()}
         applyView();
       });
     }
+    // Real-price rows are rebuilt on every range update; use delegation.
+    document.addEventListener('click', function (event) {
+      var more = event.target.closest('[data-days-toggle]');
+      var collapse = event.target.closest('[data-days-collapse]');
+      var control = more || collapse;
+      if (!control || !control.closest('#real-pricing-content')) return;
+      if (collapse || (lastResult && lastResult.allShown)) dailyPages = 1;
+      else dailyPages += 1;
+      applyView();
+    });
     applyView();
   })();
 </script>

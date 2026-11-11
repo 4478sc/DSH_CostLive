@@ -14,6 +14,7 @@ import { toCsv } from '../src/report-data.mjs';
 import { renderHtml } from '../src/report-html.mjs';
 import { timeRangeRuntimeSource } from '../src/time-range.mjs';
 import { MESSAGES } from '../src/i18n.mjs';
+import { realBody } from '../src/billing-ui.mjs';
 import { main } from '../src/cli.mjs';
 const at = (day) => Date.parse(day + 'T12:00:00+08:00');
 const config = (start = '2026-11-01', a = 30, b = 60) => normalizeBilling({ mode:'real', subscriptions:{opencode:[{effectiveFrom:start,monthlyUsd:a}],codex:[{effectiveFrom:start,monthlyUsd:b}]} });
@@ -126,6 +127,30 @@ test('billing API rejects cross-origin, missing header, invalid input and persis
     assert.equal((await send({...config(),mode:'usage'})).status,200);
     assert.equal((await (await fetch(live.url+'api/report')).json()).billing.config.mode,'usage');
   }finally{await live.close();rmSync(f.dir,{recursive:true,force:true});}
+});
+
+test('real-price daily costs reveal seven days at a time without changing totals', () => {
+  const dataset = {billing:{config:config('2026-10-01'),usage:[],bounds:{}}};
+  const content = {innerHTML:''};
+  const doc = {getElementById(id) { if (id === 'dsh-cost-data') return {textContent:JSON.stringify(dataset)}; if(id === 'real-pricing-content') return content; return null; },querySelector(){return null;},querySelectorAll(){return [];} };
+  const context = vm.createContext({window:{}}); vm.runInContext(timeRangeRuntimeSource(), context);
+  const apply = (pages, range = 'all', showAllDays = false) => context.window.DSH_TIME_RANGE.applyTimeRange(doc,{range,dailyPages:pages,showAllDays,now:at('2026-11-12'),messages:MESSAGES.en});
+  const count = () => (content.innerHTML.match(/<tr data-real-day>/g) || []).length;
+  const initial = apply(1); assert.equal(count(),7); assert.equal(initial.extra,36); assert.equal(initial.allShown,false);
+  assert.match(content.innerHTML,/Show more/); const cost = initial.stats.costMicroUsd;
+  const next = apply(2); assert.equal(count(),14); assert.equal(next.extra,29); assert.equal(next.stats.costMicroUsd,cost);
+  assert.match(content.innerHTML,/data-days-collapse>Show less/);
+  apply(3); assert.equal(count(),21);
+  const complete = apply(7); assert.equal(count(),43); assert.equal(complete.allShown,true);
+  assert.match(content.innerHTML,/data-days-toggle aria-expanded="true">Show less/);
+  apply(1); assert.equal(count(),7);
+  const today = apply(7,'today'); assert.equal(count(),1); assert.equal(today.allShown,false); assert.doesNotMatch(content.innerHTML,/data-days-toggle/);
+  apply(7,'7d'); assert.equal(count(),7); assert.doesNotMatch(content.innerHTML,/data-days-toggle/);
+  apply(2); assert.equal(count(),14); apply(2); assert.equal(count(),14);
+  apply(undefined,'all',true); assert.equal(count(),43);
+  const real = subscriptionReport([],config('2026-10-01'),{now:at('2026-11-12')});
+  const html = realBody(real,'en'); assert.equal((html.match(/<tr data-real-day>/g)||[]).length,7); assert.match(html,/data-days-toggle/); assert.doesNotMatch(html,/max-height:520px/);
+  assert.doesNotMatch(realBody(subscriptionReport([],config(),{now:at('2026-11-01')}),'en'),/data-days-toggle/);
 });
 
 test('real pricing DOM hook updates cards and providers for every range',()=>{

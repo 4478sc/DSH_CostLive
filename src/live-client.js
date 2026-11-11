@@ -680,7 +680,7 @@
       var daysToggle = event.target.closest ? event.target.closest('[data-days-toggle]') : null;
       if (daysToggle) {
         event.preventDefault();
-        var dailyView = state.lastView && state.lastView.view === 'daily' ? state.lastView : null;
+        var dailyView = state.lastView && (state.lastView.view === 'daily' || state.lastView.view === 'real') ? state.lastView : null;
         if (dailyView && dailyView.allShown === true) setDailyPages(1);
         else setDailyPages(state.dailyPages + 1);
         return;

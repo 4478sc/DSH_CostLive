@@ -334,6 +334,20 @@ export function i18nText(messages, key, params) {
   );
 }
 
+/** Known data-source labels rendered in English (the config itself stays as-is). */
+const SOURCE_LABELS_EN = Object.freeze({
+  '主机': 'host',
+  '本机': 'local',
+  '虚拟机': 'VM',
+  '云主机': 'cloud',
+});
+
+/** Localize a configured source label for display; unknown labels pass through. */
+export function sourceLabel(label, locale) {
+  if (normalizeLocale(locale) !== 'en' || typeof label !== 'string') return label;
+  return SOURCE_LABELS_EN[label.trim()] ?? label;
+}
+
 /** Server-side shorthand: t('en', 'card.cost'). */
 export function t(locale, key, params) {
   const normalized = normalizeLocale(locale);

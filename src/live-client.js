@@ -216,7 +216,12 @@
   function applyView() {
     var runtime = window.DSH_TIME_RANGE;
     if (!runtime) return null;
-    var result = runtime.applyTimeRange(document, { range: state.range, showAll: state.showAll, view: state.view });
+    var result = runtime.applyTimeRange(document, {
+      range: state.range,
+      showAll: state.showAll,
+      view: state.view,
+      messages: MESSAGES,
+    });
     if (result) state.lastView = result;
     return result;
   }
@@ -451,7 +456,11 @@
     var timeout = window.setTimeout(function () {
       if (controller) controller.abort();
     }, 15000);
-    var url = ENDPOINT + (ENDPOINT.indexOf('?') === -1 ? '?' : '&') + 't=' + Date.now();
+    // Ask the server for the page's locale: without it the fragment would come
+    // back in the server default and the English page would flip to Chinese.
+    var locale = CONFIG.locale === 'en' ? 'en' : 'zh';
+    var url =
+      ENDPOINT + (ENDPOINT.indexOf('?') === -1 ? '?' : '&') + 'lang=' + locale + '&t=' + Date.now();
 
     window
       .fetch(url, {

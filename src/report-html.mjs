@@ -5,7 +5,7 @@ import { canonicalProvider, describePeakHours, formatCny, formatTokens } from '.
 import { formatPercent, formatTime } from './format.mjs';
 import { buildTimeRangeDataset, modelCacheSavingMicro } from './report-data.mjs';
 import { formatDay, formatRangeLabel, timeRangeRuntimeSource } from './time-range.mjs';
-import { MESSAGES, normalizeLocale, t } from './i18n.mjs';
+import { MESSAGES, normalizeLocale, sourceLabel, t } from './i18n.mjs';
 
 const ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
 
@@ -130,10 +130,15 @@ export function renderHtml(report, options = {}) {
   const multiSource = sources.length > 1;
   const sourceErrors = sources.filter((source) => source.error !== null && source.error !== undefined);
   const sourceBadge = (label) =>
-    multiSource && label ? `<span class="chip chip-source">${escapeHtml(label)}</span>` : '';
+    multiSource && label ? `<span class="chip chip-source">${escapeHtml(sourceLabel(label, locale))}</span>` : '';
   const sourceText =
     sources.length > 0
-      ? sources.map((source) => `${source.label}: ${source.home}${source.error ? tr('source.unavailable') : ''}`).join(' · ')
+      ? sources
+          .map(
+            (source) =>
+              `${sourceLabel(source.label, locale)}: ${source.home}${source.error ? tr('source.unavailable') : ''}`,
+          )
+          .join(' · ')
       : report.home;
   const models = aggregateModels(sessions, pricing);
   const billable = summary.inputTokens + summary.cacheWriteTokens + summary.cacheReadTokens;
@@ -351,7 +356,7 @@ export function renderHtml(report, options = {}) {
     sourceErrors.length > 0
       ? `<div class="note warn">${tr('note.sourceError', {
           sources: sourceErrors
-            .map((source) => `${escapeHtml(source.label)} (${escapeHtml(source.home)})`)
+            .map((source) => `${escapeHtml(sourceLabel(source.label, locale))} (${escapeHtml(source.home)})`)
             .join(locale === 'en' ? ', ' : '、'),
         })}</div>`
       : '';

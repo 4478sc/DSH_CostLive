@@ -141,6 +141,18 @@ function hanSamples(html, limit = 6) {
   return found;
 }
 
+function checkClient(root) {
+  const problems = [];
+  const source = readFileSync(join(root, 'src', 'live-client.js'), 'utf8');
+  if (!source.includes("'lang=' + locale")) {
+    problems.push('live-client.js: the fragment request must carry the page locale (bug: refresh flipped the page back to Chinese)');
+  }
+  if (!source.includes('messages: MESSAGES')) {
+    problems.push('live-client.js: applyTimeRange must receive the message table (bug: cards reverted to Chinese after a refresh)');
+  }
+  return problems;
+}
+
 function checkRender(root) {
   const problems = [];
   const report = sampleReport();
@@ -171,7 +183,7 @@ function main(argv) {
       return 2;
     }
   }
-  const problems = [...checkDictionaries(), ...checkUsage(root), ...checkRender(root)];
+  const problems = [...checkDictionaries(), ...checkUsage(root), ...checkClient(root), ...checkRender(root)];
   const counts = LOCALES.map((locale) => locale + '=' + Object.keys(MESSAGES[locale]).length).join(' ');
   if (problems.length === 0) {
     process.stdout.write('ok: ' + counts + ' keys, both locales render cleanly\n');

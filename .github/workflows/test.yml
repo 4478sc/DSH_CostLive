@@ -41,3 +41,14 @@ jobs:
           node-version: 22
       - name: README.md and README.en.md must have the same sections
         run: npm run check:readme
+
+  i18n:
+    name: i18n parity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Chinese and English UI must stay in sync
+        run: npm run check:i18n

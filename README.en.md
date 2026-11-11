@@ -257,6 +257,7 @@ schtasks /Create /TN DSH_CostLive_SyncKeepAlive /SC MINUTE /MO 5 /F ^
   buckets each **sample time** into a local calendar day, so one session can appear on two days, and cards plus
   the model table switch to sample totals — this answers "how much did today actually cost". In the by-day view
   Today / 7 days / 30 days are calendar days (including today) in the local time zone.
+- **English UI**: use the “中文” / “English” link in the page header, or add `?lang=en` to the URL; the server also honours the browser's `Accept-Language`. All 界面 strings live in `src/i18n.mjs`, and the two dictionaries must stay identical (`npm run check:i18n`).
 - **Session detail**: five rows by default. Click any row to expand its per-model detail, per-turn subtotals and
   every billed sample.
 - **Bottom-right panel**: connection state, data timestamp, countdown to the next refresh, total cost / sessions /

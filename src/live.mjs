@@ -19,6 +19,7 @@ import { sortCostMicro } from './money.mjs';
 import { applyOfficialOverlay, loadOfficialReport, loadOfficialState, officialWindowTotals } from './opencode-usage.mjs';
 import { loadSources } from './sources.mjs';
 import { timeRangeRuntimeSource } from './time-range.mjs';
+import { DEFAULT_LOCALE, MESSAGES, normalizeLocale, t } from './i18n.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -271,14 +272,17 @@ export function summarizeReport(report) {
 }
 
 /** HTML body fragment swapped into the open page on every refresh. */
-export function renderLiveFragment(report) {
-  const { body } = splitReportHtml(renderHtml(report));
+export function renderLiveFragment(report, options = {}) {
+  const locale = options.locale;
+  const { body } = splitReportHtml(renderHtml(report, { locale }));
   return {
     generatedAt: report.generatedAt,
     generatedAtISO: report.generatedAtISO,
     summary: summarizeReport(report),
     html: body,
     dataset: buildReportDataset(report),
+    locale: normalizeLocale(locale),
+    messages: MESSAGES[normalizeLocale(locale)],
   };
 }
 
@@ -309,9 +313,11 @@ export function renderLiveDocument(options) {
     intervalMs = DEFAULT_INTERVAL_MS,
     autoReload = false,
     serverUrl = null,
-    title = 'DSH 会话费用 · 实时',
+    locale: rawLocale = DEFAULT_LOCALE,
+    title = null,
   } = options;
-  const { styles, body } = splitReportHtml(renderHtml(report));
+  const locale = normalizeLocale(rawLocale);
+  const { styles, body } = splitReportHtml(renderHtml(report, { locale }));
   const bodyWithId = body.replace('<div class="wrap">', '<div class="wrap" id="live-wrap">');
   const config = {
     version: LIVE_VERSION,
@@ -321,25 +327,27 @@ export function renderLiveDocument(options) {
     generatedAt: report.generatedAt,
     endpoint: LIVE_ENDPOINT,
     serverUrl,
+    locale,
+    messages: MESSAGES[locale],
   };
 
   return `<!doctype html>
-<html lang="zh-CN">
+<html lang="${locale === 'en' ? 'en' : 'zh-CN'}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta name="color-scheme" content="light">
 <meta name="generator" content="dsh-cost live ${LIVE_VERSION}">
-<title>${escapeHtml(title)}</title>
+<title>${escapeHtml(title ?? t(locale, 'app.title'))}</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230f766e'/%3E%3Ctext x='16' y='22' font-family='sans-serif' font-size='16' font-weight='700' text-anchor='middle' fill='white'%3E%C2%A5%3C/text%3E%3C/svg%3E">
 <style>
 ${styles}${LIVE_CSS}</style>
 </head>
 <body class="live-body">
 ${bodyWithId}
-<noscript><div class="note warn">实时刷新需要启用 JavaScript；当前显示的是服务端生成的快照。</div></noscript>
-<script>window.__DSH_LIVE__ = ${scriptJson(config)};</script>
+<noscript><div class="note warn">${escapeHtml(t(locale, 'noscript'))}</div></noscript>
+<script>window.__DSH_LIVE__ = ${scriptJson({ ...config, locale, messages: MESSAGES[locale] })};</script>
 <script>
 ${timeRangeRuntimeSource()}
 </script>

@@ -37,6 +37,7 @@
     "live:once": "node bin/dsh-cost-live.mjs --once",
     "live:watch": "node bin/dsh-cost-live.mjs --watch",
     "report": "node bin/dsh-cost.mjs report --format html --out out/dsh-cost-report.html",
-    "check:readme": "node tools/check-readme-parity.mjs"
+    "check:readme": "node tools/check-readme-parity.mjs",
+    "check:i18n": "node tools/check-i18n.mjs"
   }
 }

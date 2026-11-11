@@ -15,6 +15,16 @@
   'use strict';
 
   var CONFIG = window.__DSH_LIVE__ || {};
+  var MESSAGES = (CONFIG && CONFIG.messages) || (window.__DSH_I18N__ && window.__DSH_I18N__.messages) || {};
+
+  /** Translated UI string; falls back to the key so a gap is visible. */
+  function tr(key, params) {
+    var value = Object.prototype.hasOwnProperty.call(MESSAGES, key) ? MESSAGES[key] : key;
+    if (!params) return value;
+    return String(value).replace(/\{(\w+)\}/g, function (match, name) {
+      return params[name] === undefined || params[name] === null ? match : String(params[name]);
+    });
+  }
   var MODE = CONFIG.mode === 'file' ? 'file' : 'http';
   var INTERVAL = Math.max(5000, Number(CONFIG.intervalMs) || 20000);
   var AUTO_RELOAD = MODE === 'file' && CONFIG.autoReload === true;
@@ -258,20 +268,20 @@
   function buildDock() {
     dock = document.createElement('aside');
     dock.className = 'live-dock';
-    dock.setAttribute('aria-label', '实时刷新状态');
+    dock.setAttribute('aria-label', tr('client.statusAria'));
     dock.innerHTML = [
       '<div class="ld-head">',
       '<span class="ld-dot" aria-hidden="true"></span>',
-      '<span class="ld-label">实时</span>',
+      '<span class="ld-label">' + tr('client.live') + '</span>',
       '<span class="ld-time">—</span>',
       '</div>',
       '<div class="ld-progress" aria-hidden="true"><i></i></div>',
       '<div class="ld-sub">—</div>',
       '<div class="ld-metrics">—</div>',
       '<div class="ld-actions">',
-      '<button type="button" class="ld-btn" data-act="refresh" title="立即刷新（快捷键 R）">刷新</button>',
-      '<button type="button" class="ld-btn" data-act="pause" title="暂停 / 继续自动刷新（快捷键 P）">暂停</button>',
-      '<a class="ld-link" data-act="server" target="_blank" rel="noopener" hidden>实时版</a>',
+      '<button type="button" class="ld-btn" data-act="refresh" title="' + tr('client.refreshTitle') + '">' + tr('client.refresh') + '</button>',
+      '<button type="button" class="ld-btn" data-act="pause" title="' + tr('client.pauseTitle') + '">' + tr('client.pause') + '</button>',
+      '<a class="ld-link" data-act="server" target="_blank" rel="noopener" hidden>' + tr('client.openLive') + '</a>',
       '</div>',
       '<div class="ld-note" hidden></div>',
     ].join('');
@@ -320,11 +330,11 @@
   }
 
   function statusOf() {
-    if (state.busy) return { key: 'loading', label: '刷新中' };
-    if (state.paused) return { key: state.autoPausedForStale ? 'stale' : 'paused', label: '已暂停' };
-    if (state.error) return { key: 'error', label: '连接中断' };
-    if (MODE === 'file') return AUTO_RELOAD ? { key: 'file', label: '自动重载' } : { key: 'static', label: '静态快照' };
-    return { key: 'live', label: '实时' };
+    if (state.busy) return { key: 'loading', label: tr('client.loading') };
+    if (state.paused) return { key: state.autoPausedForStale ? 'stale' : 'paused', label: tr('client.paused') };
+    if (state.error) return { key: 'error', label: tr('client.error') };
+    if (MODE === 'file') return AUTO_RELOAD ? { key: 'file', label: tr('client.autoReload') } : { key: 'static', label: tr('client.static') };
+    return { key: 'live', label: tr('client.live') };
   }
 
   function render() {
@@ -339,36 +349,33 @@
     dock.dataset.state = status.key;
     ui.label.textContent = status.label;
     ui.time.textContent = state.lastGeneratedAt ? clock(state.lastGeneratedAt) : '—';
-    ui.time.title = state.lastGeneratedAt ? '数据生成时间 ' + new Date(state.lastGeneratedAt).toLocaleString() : '';
+    ui.time.title = state.lastGeneratedAt ? tr('client.dataAt', { time: new Date(state.lastGeneratedAt).toLocaleString() }) : '';
     ui.progress.style.width = (ratio * 100).toFixed(1) + '%';
-    ui.metrics.textContent = summary.cost + ' · ' + summary.sessions + ' 个会话\n' + summary.tokens + ' tokens';
-    ui.metrics.title = [summary.range, summary.unpriced || '所有会话的 token 与费用合计'].filter(Boolean).join('\n');
+    ui.metrics.textContent = tr('client.metrics', { cost: summary.cost, sessions: summary.sessions, tokens: summary.tokens });
+    ui.metrics.title = [summary.range, summary.unpriced || tr('client.allSessions')].filter(Boolean).join('\n');
 
     if (MODE === 'http') {
-      if (state.paused) ui.sub.textContent = '自动刷新已暂停';
-      else if (state.busy) ui.sub.textContent = '正在拉取最新数据…';
-      else if (state.error) ui.sub.textContent = '连接失败 · 第 ' + state.fails + ' 次重试中';
-      else ui.sub.textContent = '每 ' + intervalSeconds + ' 秒自动刷新 · ' + seconds + ' 秒后更新';
+      if (state.paused) ui.sub.textContent = tr('client.sub.paused');
+      else if (state.busy) ui.sub.textContent = tr('client.sub.busy');
+      else if (state.error) ui.sub.textContent = tr('client.sub.error', { count: state.fails });
+      else ui.sub.textContent = tr('client.sub.live', { seconds: intervalSeconds, remaining: seconds });
     } else if (AUTO_RELOAD) {
-      if (state.paused) ui.sub.textContent = state.autoPausedForStale ? '文件未更新 · 自动重载已暂停' : '自动重载已暂停';
-      else ui.sub.textContent = '每 ' + intervalSeconds + ' 秒重载 · ' + seconds + ' 秒后重载';
+      if (state.paused) ui.sub.textContent = state.autoPausedForStale ? tr('client.sub.filePaused') : tr('client.sub.paused');
+      else ui.sub.textContent = tr('client.sub.file', { seconds: intervalSeconds, remaining: seconds });
     } else {
-      ui.sub.textContent = '静态快照 · 不会自动更新';
+      ui.sub.textContent = tr('client.sub.static');
     }
 
-    ui.refresh.textContent = MODE === 'file' ? '重载' : '刷新';
+    ui.refresh.textContent = MODE === 'file' ? tr('client.reload') : tr('client.refresh');
     ui.refresh.disabled = state.busy;
-    ui.pause.textContent = state.paused ? '继续' : '暂停';
+    ui.pause.textContent = state.paused ? tr('client.resume') : tr('client.pause');
 
     if (state.error) {
-      setNote('无法连接本地服务（' + state.error + '），将自动重试。', 'error');
+      setNote(tr('client.note.cannotConnect', { error: state.error }), 'error');
     } else if (state.autoPausedForStale) {
-      setNote(
-        '此快照连续 ' + MAX_STALE + ' 次没有更新：浏览器无法自行执行命令。请双击 dsh-cost-live-watch.cmd 启动后台更新，然后点「继续」。',
-        '',
-      );
+      setNote(tr('client.note.stale', { count: MAX_STALE }), '');
     } else if (MODE === 'file' && state.storageBlocked) {
-      setNote('浏览器禁止 file:// 页面使用本地存储，自动重载已停用（否则会无限刷新）。请使用 dsh-cost-live.cmd 启动本地实时服务。', '');
+      setNote(tr('client.note.noStorage'), '');
     } else if (MODE === 'file' && !AUTO_RELOAD) {
       setNote('file:/// 页面不能直接执行 dsh-cost 命令；需要自动更新请使用 dsh-cost-live.cmd 或 dsh-cost-live-watch.cmd。', '');
     } else if (

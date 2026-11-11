@@ -1,0 +1,5 @@
+@echo off
+REM Copy this file to config\vm-sync.local.cmd (git-ignored) and edit the
+REM placeholder values for your VM. Used by dsh-cost-vm-sync.cmd when it is
+REM launched without arguments.
+set "SYNC_ARGS=-VmHost 192.0.2.10 -User ubuntu -KeyPath %USERPROFILE%\.ssh\id_ed25519"

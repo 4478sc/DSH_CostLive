@@ -73,8 +73,8 @@ Windows 上也可以直接双击：
 
 | 文件 | 作用 |
 |---|---|
-| `dsh-cost-live.cmd` | 本地 HTTP 服务（推荐，页面原地刷新）；读取 `config\sources.json`，默认合并主机 + VM，并自动拉起 VM 同步循环（已在跑则复用） |
-| `dsh-cost-vm-sync.cmd` | 每 20 秒把 VM 的 `~/.dsh` 增量同步到 `.dsh-vm/`，保持窗口打开 |
+| `dsh-cost-live.cmd` | 本地 HTTP 服务（推荐，页面原地刷新）；读取 `config\sources.json`，默认合并主机 + VM，并通过 `tools\ensure-host-sync.ps1` 拉起 / 复用两个同步循环 |
+| `dsh-cost-vm-sync.cmd` | 每 20 秒把 VM 的 `~/.dsh` 增量同步到 `.dsh-vm/`，保持窗口打开；目标 VM 依次取参数、`config\vm-sync.local.cmd`（已 git 忽略，参考同名 `.example`）、环境变量 `DSH_COST_VM_HOST` / `DSH_COST_VM_USER` / `DSH_COST_VM_KEY` |
 | `dsh-cost-live-watch.cmd` | 后台每 20 秒重建独立 HTML，供 `file:///` 打开 |
 
 > macOS / Linux：命令相同，`.cmd` 换成 `node bin/dsh-cost-live.mjs` 即可。
@@ -202,8 +202,16 @@ node tools\opencode-sync.mjs --loop      # 每 60 秒同步；dsh-cost-live.cmd 
 node bin\dsh-cost.mjs --no-official      # 临时不看官方归档（opencode 会话仍待官网，不回退 CNY）
 ```
 
-`dsh-cost-live.cmd` 现在会同时拉起两个后台循环：VM 镜像同步与 OpenCode 日志同步；已在运行的不重复启动
-（锁文件 `out\vm-sync.pid` / `out\opencode-sync.pid`）。
+`dsh-cost-live.cmd` 会调用 `tools\ensure-host-sync.ps1` 同时拉起两个后台循环：VM 镜像同步与 OpenCode 日志同步；
+已在运行的不重复启动（锁文件 `out\vm-sync.pid` / `out\opencode-sync.pid`）。
+
+`tools\ensure-host-sync.ps1` 是幂等的，可以单独运行，也可以挂到计划任务里自愈（循环挂掉后最多等一个周期就回来；
+归档超过 10 分钟没更新时会在 `out\ensure-sync.log` 写一条 WARN）：
+
+```bat
+schtasks /Create /TN DSH_CostLive_SyncKeepAlive /SC MINUTE /MO 5 /F ^
+  /TR "powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File <repo>\tools\ensure-host-sync.ps1"
+```
 
 ---
 

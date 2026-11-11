@@ -74,7 +74,7 @@ Windows 上也可以直接双击：
 | 文件 | 作用 |
 |---|---|
 | `dsh-cost-live.cmd` | 本地 HTTP 服务（推荐，页面原地刷新）；读取 `config\sources.json`，默认合并主机 + VM，并自动拉起 VM 同步循环（已在跑则复用） |
-| `dsh-cost-vm-sync.cmd` | 每 20 秒把 VM 的 `~/.dsh` 增量同步到 `.dsh-vm/`，保持窗口打开 |
+| `dsh-cost-vm-sync.cmd` | 每 20 秒把 VM 的 `~/.dsh` 增量同步到 `.dsh-vm/`，保持窗口打开；目标 VM 依次取参数、`config\vm-sync.local.cmd`（已 git 忽略，参考同名 `.example`）、环境变量 `DSH_COST_VM_HOST` / `DSH_COST_VM_USER` / `DSH_COST_VM_KEY` |
 | `dsh-cost-live-watch.cmd` | 后台每 20 秒重建独立 HTML，供 `file:///` 打开 |
 
 > macOS / Linux：命令相同，`.cmd` 换成 `node bin/dsh-cost-live.mjs` 即可。

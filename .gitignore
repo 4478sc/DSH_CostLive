@@ -22,6 +22,9 @@ desktop.ini
 # official usage archive = real billing data, never commit
 .opencode-usage/
 
+# local VM target (host address / user / ssh key)
+config/vm-sync.local.cmd
+
 # local hand-over prompts / personal notes
 HANDOVER*.md
 HANDOVER*.txt

@@ -535,6 +535,30 @@ test('applyTimeRange shows the empty state when nothing matches', () => {
   assert.equal(dom.toggle.textContent.includes('显示更多'), true);
 });
 
+test('show more reveals one page at a time instead of everything', () => {
+  const records = Array.from({ length: 12 }, (_, index) => datasetRecord('s' + index, NOW - index * 3600_000));
+  const dom = makeDom(records);
+  const visible = () => dom.rows.filter((row) => !row.hasAttribute('hidden')).length;
+
+  let result = runtime.applyTimeRange(dom.doc, { range: 'all', now: NOW });
+  assert.equal(visible(), 5, 'first page');
+  assert.equal(dom.toggle.textContent, '显示更多（还有 7 个）');
+  assert.equal(result.allShown, false);
+
+  result = runtime.applyTimeRange(dom.doc, { range: 'all', sessionPages: 2, now: NOW });
+  assert.equal(visible(), 10, 'second page');
+  assert.equal(dom.toggle.textContent, '显示更多（还有 2 个）');
+
+  result = runtime.applyTimeRange(dom.doc, { range: 'all', sessionPages: 3, now: NOW });
+  assert.equal(visible(), 12, 'everything is visible now');
+  assert.equal(result.allShown, true);
+  assert.equal(dom.toggle.textContent, '收起');
+  assert.equal(dom.toggle.getAttribute('aria-expanded'), 'true');
+
+  runtime.applyTimeRange(dom.doc, { range: 'all', sessionPages: 1, now: NOW });
+  assert.equal(visible(), 5, 'collapsing goes back to the first page');
+});
+
 test('showAll reveals every filtered row and switches the button label', () => {
   const records = Array.from({ length: 7 }, (_, index) =>
     datasetRecord(`s${index}`, NOW - index * 3600_000),

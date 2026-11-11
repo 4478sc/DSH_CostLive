@@ -669,8 +669,9 @@ ${timeRangeRuntimeSource()}
     window.__DSH_I18N__ = i18n;
     var range = runtime.normalizeTimeRange(urlParam('range') || runtime.readSavedRange(storage));
     var view = runtime.normalizeView(urlParam('view') || runtime.readSavedView(storage));
-    var expanded = false;
-    var daysExpanded = false;
+    var sessionPages = 1;
+    var dailyPages = 1;
+    var lastResult = null;
     function urlParam(name) {
       try {
         return new URLSearchParams(window.location.search).get(name);
@@ -689,13 +690,14 @@ ${timeRangeRuntimeSource()}
       }
     }
     function applyView() {
-      runtime.applyTimeRange(document, {
+      lastResult = runtime.applyTimeRange(document, {
         range: range,
-        showAll: expanded,
-        showAllDays: daysExpanded,
+        sessionPages: sessionPages,
+        dailyPages: dailyPages,
         view: view,
         messages: i18n.messages,
       });
+      return lastResult;
     }
     runtime.bindRangeSelector(document, function (next) {
       range = next;
@@ -721,9 +723,10 @@ ${timeRangeRuntimeSource()}
       var button = section.querySelector('[data-sessions-toggle]');
       if (button) {
         button.addEventListener('click', function () {
-          expanded = !expanded;
+          var last = lastResult;
+          if (last && last.view === 'session' && last.allShown === true) sessionPages = 1;
+          else sessionPages += 1;
           applyView();
-          section.classList.toggle('sessions-expanded', expanded);
         });
       }
     }
@@ -732,7 +735,9 @@ ${timeRangeRuntimeSource()}
       var daysButton = dailySection.querySelector('[data-days-toggle]');
       if (daysButton) {
         daysButton.addEventListener('click', function () {
-          daysExpanded = !daysExpanded;
+          var last = lastResult;
+          if (last && last.view === 'daily' && last.allShown === true) dailyPages = 1;
+          else dailyPages += 1;
           applyView();
         });
       }

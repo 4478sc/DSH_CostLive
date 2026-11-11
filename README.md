@@ -1,5 +1,7 @@
 # DSH_CostLive
 
+[English](README.en.md) | 简体中文
+
 > 给 DeepSeek Harness（DSH）会话做的**费用实时面板**：
 > 每 20 秒重新扫描会话日志，按模型、按 token 桶（未缓存输入 / 输出 / 缓存写 / 缓存读）计价，
 > 在浏览器里显示人民币花费、缓存命中、运行中会话与历史明细。

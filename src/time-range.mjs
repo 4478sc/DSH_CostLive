@@ -596,6 +596,11 @@ function applyDailyView(doc, range, now, days, messages, showAllDays, dailyPages
             : uiText(messages, 'more.days.plain') || '显示更多';
       dayToggle.setAttribute('data-more-label', dayLabel);
       dayToggle.textContent = dayLabel;
+      var dayCollapse = doc.querySelector('[data-days-collapse]');
+      if (dayCollapse) {
+        if (dailyPages > 1 && !dayAllShown) dayCollapse.removeAttribute('hidden');
+        else dayCollapse.setAttribute('hidden', '');
+      }
       dayToggle.setAttribute('aria-expanded', dayAllShown ? 'true' : 'false');
     }
   }
@@ -743,6 +748,11 @@ function applyTimeRange(doc, options) {
           : (uiText(messages, 'more.show.plain') || '显示更多');
       toggle.setAttribute('data-more-label', moreLabel);
       toggle.textContent = moreLabel;
+      var collapseToggle = doc.querySelector('[data-sessions-collapse]');
+      if (collapseToggle) {
+        if (sessionPages > 1 && !allShown) collapseToggle.removeAttribute('hidden');
+        else collapseToggle.setAttribute('hidden', '');
+      }
       toggle.setAttribute('aria-expanded', allShown ? 'true' : 'false');
     }
   }

@@ -418,6 +418,7 @@ function makeDom(records, pageSize = 5) {
   const note = makeNode();
   const flag = makeNode({ hidden: '' });
   const more = makeNode();
+  const collapse = makeNode({ hidden: '' });
   const toggle = makeNode();
   for (const range of ['all', '30d', '7d', 'today']) {
     const button = makeNode({ 'data-range': range, 'aria-pressed': range === 'all' ? 'true' : 'false' });
@@ -432,6 +433,7 @@ function makeDom(records, pageSize = 5) {
     querySelector(selector) {
       if (selector === '[data-sessions-more]') return more;
       if (selector === '[data-sessions-toggle]') return toggle;
+      if (selector === '[data-sessions-collapse]') return collapse;
       if (selector === '[data-range-note]') return note;
       if (selector === '[data-range-flag]') return flag;
       return null;
@@ -440,7 +442,7 @@ function makeDom(records, pageSize = 5) {
       return selector === '.time-range-selector .range-btn' ? buttons : [];
     },
   };
-  return { doc, rows, buttons, nodes, note, flag, more, toggle, bar };
+  return { doc, rows, buttons, nodes, note, flag, more, toggle, collapse, bar };
 }
 
 function runtimeForTests() {

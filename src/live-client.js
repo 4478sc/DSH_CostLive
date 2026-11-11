@@ -659,6 +659,18 @@
         else setSessionPages(state.sessionPages + 1);
         return;
       }
+      var sessionsCollapse = event.target.closest ? event.target.closest('[data-sessions-collapse]') : null;
+      if (sessionsCollapse) {
+        event.preventDefault();
+        setSessionPages(1);
+        return;
+      }
+      var daysCollapse = event.target.closest ? event.target.closest('[data-days-collapse]') : null;
+      if (daysCollapse) {
+        event.preventDefault();
+        setDailyPages(1);
+        return;
+      }
       var daysToggle = event.target.closest ? event.target.closest('[data-days-toggle]') : null;
       if (daysToggle) {
         event.preventDefault();

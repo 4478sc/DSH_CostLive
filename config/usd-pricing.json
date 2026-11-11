@@ -1,0 +1,26 @@
+{
+  "currency": "USD",
+  "unitTokens": 1000000,
+  "_source": "OpenAI API list prices (USD per 1M tokens), from the OpenRouter model catalog 2026-11-11",
+  "_note": "Long-context surcharge above 272k prompt tokens (2x input / 1.5x output on the official page) is not modelled. openai / host-codex are the same Codex service and are priced and grouped with codex.",
+  "providers": [
+    "codex",
+    "openai",
+    "host-codex"
+  ],
+  "models": {
+    "gpt-6.1-sol": {
+      "input": 2,
+      "output": 10,
+      "cacheWrite": 2.5,
+      "cacheRead": 0.1
+    },
+    "gpt-6-luna": {
+      "input": 0.1,
+      "output": 0.5,
+      "cacheWrite": 0.125,
+      "cacheRead": 0.01
+    }
+  },
+  "aliases": {}
+}

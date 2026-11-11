@@ -5,7 +5,7 @@ import { dirname, resolve } from 'node:path';
 import { sortSessionResults } from './activity.mjs';
 import { analyzeEvents } from './engine.mjs';
 import { formatMoney } from './money.mjs';
-import { loadPricing, formatCny, priceTier, resolvePrice } from './pricing.mjs';
+import { loadPricing, loadUsdPricing, formatCny, priceTier, resolvePrice } from './pricing.mjs';
 import { buildReport, toCsv } from './report-data.mjs';
 import { renderHtml } from './report-html.mjs';
 import { renderDetail, renderList, renderModels, verifyProjection } from './report-text.mjs';
@@ -14,7 +14,7 @@ import { applyOfficialOverlay, loadOfficialReport, loadOfficialState, officialWi
 import { loadSources } from './sources.mjs';
 
 const COMMANDS = new Set(['list', 'session', 'models', 'report', 'help']);
-const VALUE_FLAGS = new Set(['home', 'workspace', 'model', 'since', 'until', 'format', 'out', 'top', 'pricing', 'official']);
+const VALUE_FLAGS = new Set(['home', 'workspace', 'model', 'since', 'until', 'format', 'out', 'top', 'pricing', 'usd', 'official']);
 
 const HELP = `dsh-cost — DeepSeek Harness 会话费用（CNY）
 
@@ -126,7 +126,7 @@ function parseDateBound(value, endOfDay) {
 }
 
 /** Analyze every discovered session; unreadable logs are reported, never fatal. */
-function analyzeAll(descriptors, pricing, options) {
+function analyzeAll(descriptors, pricing, usdPricing, options) {
   const results = [];
   for (const descriptor of descriptors) {
     try {
@@ -134,7 +134,7 @@ function analyzeAll(descriptors, pricing, options) {
       meta.source = descriptor.source ?? null;
       meta.sourceHome = descriptor.sourceHome ?? null;
       if (badLines > 0 && options.verbose) process.stderr.write(`warning: ${meta.id}: skipped ${badLines} malformed log line(s)\n`);
-      const analysis = analyzeEvents(events, pricing);
+      const analysis = analyzeEvents(events, pricing, usdPricing);
       results.push({ meta, analysis, projection });
     } catch (error) {
       process.stderr.write(`warning: cannot read ${descriptor.logPath}: ${error.message}\n`);
@@ -199,8 +199,10 @@ export function main(argv = process.argv.slice(2)) {
   }
 
   let pricing;
+  let usdPricing;
   try {
     pricing = loadPricing(options.pricing === undefined ? undefined : resolve(options.pricing));
+    usdPricing = loadUsdPricing(options.usd === undefined ? undefined : resolve(options.usd));
   } catch (error) {
     process.stderr.write(`dsh-cost: ${error.message}\n`);
     return 2;
@@ -285,7 +287,7 @@ export function main(argv = process.argv.slice(2)) {
   let results;
   let official = null;
   try {
-    results = filterResults(analyzeAll(selected, pricing, options), options);
+    results = filterResults(analyzeAll(selected, pricing, usdPricing, options), options);
     try {
       const officialReport = loadOfficialReport({
         officialPath: options.official,

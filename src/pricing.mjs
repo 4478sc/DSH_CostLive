@@ -74,14 +74,19 @@ export const OFFICIAL_PROVIDERS = Object.freeze(['opencode', 'opencode-go']);
 /**
  * Canonical provider used for grouping and display.
  *
- * `opencode-go` is the same service as `opencode` (same models, same console
- * bill), and DSH writes whichever route the request took. Folding both into
- * `opencode` keeps one row per model instead of two near-identical ones.
+ * DSH writes the route a request actually took, but several routes are the
+ * same service and the same bill:
+ *   opencode / opencode-go      -> opencode (OpenCode console, USD)
+ *   codex / openai / host-codex -> codex    (OpenAI Codex, USD list price)
+ * Folding them keeps one row per model instead of several near-identical ones.
  */
+// Kept inline (not a module const) because this function is serialized into
+// the browser runtime by timeRangeRuntimeSource() and must be self-contained.
 export function canonicalProvider(provider) {
   if (typeof provider !== 'string') return provider ?? null;
   const value = provider.trim().toLowerCase();
   if (value === 'opencode' || value === 'opencode-go') return 'opencode';
+  if (value === 'codex' || value === 'openai' || value === 'host-codex') return 'codex';
   return provider;
 }
 
@@ -185,6 +190,76 @@ export function loadPricing(path = DEFAULT_PRICING_PATH) {
     if (error instanceof SyntaxError) throw new Error(`pricing: ${path} is not valid JSON: ${error.message}`);
     throw error;
   }
+}
+
+/** USD list-price table for dollar-billed providers (e.g. `codex`). */
+export const DEFAULT_USD_PRICING_PATH = join(HERE, '..', 'config', 'usd-pricing.json');
+
+/**
+ * Validate a USD price document. Same four rates as the CNY table, quoted in
+ * USD per `unitTokens` tokens (OpenAI list price), plus the providers whose
+ * rows should be costed from it.
+ */
+export function normalizeUsdPricing(raw) {
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new Error('usd-pricing: document must be an object');
+  }
+  const unitTokens = raw.unitTokens ?? 1000000;
+  if (!Number.isInteger(unitTokens) || unitTokens <= 0) {
+    throw new Error('usd-pricing: unitTokens must be a positive integer');
+  }
+  const providers = Array.isArray(raw.providers)
+    ? raw.providers.map((provider) => String(provider).trim().toLowerCase()).filter((provider) => provider !== '')
+    : [];
+  const models = {};
+  for (const [id, price] of Object.entries(raw.models ?? {})) {
+    models[id.toLowerCase()] = rateRecord(`usd models["${id}"]`, price);
+  }
+  const aliases = {};
+  for (const [from, to] of Object.entries(raw.aliases ?? {})) {
+    if (typeof to !== 'string') throw new Error(`usd-pricing: aliases["${from}"] must be a model id string`);
+    aliases[from.toLowerCase()] = to.toLowerCase();
+  }
+  return { currency: 'USD', unitTokens, providers, models, aliases };
+}
+
+/** Load the USD table; a missing file means "no USD pricing", not an error. */
+export function loadUsdPricing(path = DEFAULT_USD_PRICING_PATH) {
+  try {
+    return normalizeUsdPricing(JSON.parse(readFileSync(path, 'utf8')));
+  } catch (error) {
+    if (error && error.code === 'ENOENT') return null;
+    if (error instanceof SyntaxError) throw new Error(`usd-pricing: ${path} is not valid JSON: ${error.message}`);
+    throw error;
+  }
+}
+
+/** True when the provider is covered by the USD table. */
+export function isUsdProvider(provider, usdPricing) {
+  if (usdPricing === null || usdPricing === undefined || typeof provider !== 'string') return false;
+  const value = provider.trim().toLowerCase();
+  if (value === '') return false;
+  return usdPricing.providers.some((prefix) => value === prefix || value.startsWith(`${prefix}-`));
+}
+
+/** Resolve one model id against the USD table, or null when it is not listed. */
+export function resolveUsdPrice(model, usdPricing) {
+  if (usdPricing === null || usdPricing === undefined) return null;
+  for (const id of candidatesFor(model, usdPricing)) {
+    const price = usdPricing.models[id];
+    if (price !== undefined) return { key: id, price };
+  }
+  return null;
+}
+
+/** Micro-USD for one bucket set under one USD rate record (same arithmetic as CNY). */
+export function costMicroUsd(buckets, price) {
+  return Math.round(
+    buckets.uncachedInputTokens * price.input +
+      buckets.outputTokens * price.output +
+      buckets.cacheWriteTokens * price.cacheWrite +
+      buckets.cacheReadTokens * price.cacheRead,
+  );
 }
 
 /** Canonical-ish model id: lowercase, provider prefix and vendor suffix removed. */

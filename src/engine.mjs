@@ -12,7 +12,20 @@
  * Record semantics make the totals exact without delta subtraction: one record
  * per billed attempt; a replacement overwrites its record; a retry appends.
  */
-import { addBuckets, billedInputTokens, canonicalProvider, costMicroCny, isOfficialProvider, priceTier, resolvePrice, zeroBuckets } from './pricing.mjs';
+import {
+  addBuckets,
+  billedInputTokens,
+  canonicalProvider,
+  costMicroCny,
+  costMicroUsd,
+  isOfficialProvider,
+  isUsdProvider,
+  priceTier,
+  resolvePrice,
+  resolveUsdPrice,
+  zeroBuckets,
+} from './pricing.mjs';
+import { sortCostMicro } from './money.mjs';
 
 /** The last provider usage sample embedded in an assistant settlement's stream. */
 export function usageFromEvent(event) {
@@ -63,7 +76,7 @@ export function totalTokens(buckets) {
  * @param pricing - normalized pricing document.
  * @returns per-model, per-turn, and whole-session cost figures.
  */
-export function analyzeEvents(events, pricing) {
+export function analyzeEvents(events, pricing, usdPricing = null) {
   const records = [];
   const warnings = [];
   let active = { provider: null, model: null };
@@ -104,6 +117,10 @@ export function analyzeEvents(events, pricing) {
         const officialProvider = isOfficialProvider(active.provider);
         const lookup = resolvePrice(active.model, pricing);
         const resolved = officialProvider ? null : lookup;
+        // Dollar-billed routes (codex) are costed from the USD list price and
+        // never from the CNY table, so the two currencies stay separate.
+        const usdResolved =
+          !officialProvider && isUsdProvider(active.provider, usdPricing) ? resolveUsdPrice(active.model, usdPricing) : null;
         const record = {
           seq: event.seq,
           time: event.time,
@@ -111,8 +128,8 @@ export function analyzeEvents(events, pricing) {
           step,
           provider: active.provider,
           model: active.model,
-          priceKey: officialProvider ? 'opencode-pending' : (resolved?.key ?? null),
-          priced: resolved !== null,
+          priceKey: officialProvider ? 'opencode-pending' : usdResolved !== null ? `usd-${usdResolved.key}` : (resolved?.key ?? null),
+          priced: resolved !== null || usdResolved !== null,
           // Peak/off split for two-tier models. Official rows have no CNY price,
           // so the lookup is only used to know whether the model is tiered.
           tier: priceTier(lookup?.price ?? null, event.time),
@@ -121,9 +138,13 @@ export function analyzeEvents(events, pricing) {
           // `event.time` selects the tier: two-tier models (DeepSeek) bill
           // off-peak samples at the discounted rate of the sample's own clock.
           costMicroCny: resolved === null ? 0 : costMicroCny(buckets, resolved.price, event.time),
-          costMicroUsd: 0,
+          costMicroUsd: usdResolved === null ? 0 : costMicroUsd(buckets, usdResolved.price),
+          cacheSavingMicroUsd:
+            usdResolved === null
+              ? 0
+              : Math.round(buckets.cacheReadTokens * (usdResolved.price.input - usdResolved.price.cacheRead)),
         };
-        if (!officialProvider && !resolved && active.model) warnings.push(`no price for model "${active.model}" (provider ${active.provider ?? 'unknown'})`);
+        if (!officialProvider && !resolved && !usdResolved && active.model) warnings.push(`no price for model "${active.model}" (provider ${active.provider ?? 'unknown'})`);
         if (last !== null && last.turn === turn && last.step === step) {
           if (bucketsEqual(records[last.index].buckets, buckets)) continue;
           records[last.index] = record;
@@ -140,11 +161,13 @@ export function analyzeEvents(events, pricing) {
   const billed = records.filter((record) => totalTokens(record.buckets) > 0);
   const totalsBuckets = zeroBuckets();
   let totalMicro = 0;
+  let totalMicroUsd = 0;
   const models = new Map();
   const turns = new Map();
   for (const record of billed) {
     addBuckets(totalsBuckets, record.buckets);
     totalMicro += record.costMicroCny;
+    totalMicroUsd += record.costMicroUsd ?? 0;
     const modelProvider = canonicalProvider(record.provider);
     const modelKey = `${modelProvider ?? '?'}\u0000${record.model ?? '?'}\u0000${record.tier ?? ''}`;
     let modelEntry = models.get(modelKey);
@@ -159,6 +182,7 @@ export function analyzeEvents(events, pricing) {
         tokens: zeroBuckets(),
         costMicroCny: 0,
         costMicroUsd: 0,
+        cacheSavingMicroUsd: 0,
         samples: 0,
       };
       models.set(modelKey, modelEntry);
@@ -166,6 +190,7 @@ export function analyzeEvents(events, pricing) {
     addBuckets(modelEntry.tokens, record.buckets);
     modelEntry.costMicroCny += record.costMicroCny;
     modelEntry.costMicroUsd += record.costMicroUsd ?? 0;
+    modelEntry.cacheSavingMicroUsd += record.cacheSavingMicroUsd ?? 0;
     modelEntry.samples += 1;
     let turnEntry = turns.get(record.turn);
     if (turnEntry === undefined) {
@@ -182,10 +207,10 @@ export function analyzeEvents(events, pricing) {
     .map((entry) => ({
       ...entry,
       costCny: entry.costMicroCny / 1e6,
-      costUsd: 0,
+      costUsd: entry.costMicroUsd / 1e6,
       share: totalMicro === 0 ? 0 : entry.costMicroCny / totalMicro,
     }))
-    .sort((a, b) => b.costMicroCny - a.costMicroCny || totalTokens(b.tokens) - totalTokens(a.tokens));
+    .sort((a, b) => sortCostMicro(b) - sortCostMicro(a) || totalTokens(b.tokens) - totalTokens(a.tokens));
 
   const byTurn = [...turns.values()]
     .map((entry) => ({
@@ -209,8 +234,8 @@ export function analyzeEvents(events, pricing) {
       totalTokens: totalTokens(totalsBuckets),
       costMicroCny: totalMicro,
       costCny: totalMicro / 1e6,
-      costMicroUsd: 0,
-      costUsd: 0,
+      costMicroUsd: totalMicroUsd,
+      costUsd: totalMicroUsd / 1e6,
       billedInputTokens: billedInputTokens(totalsBuckets),
       cacheHit: billedInputTokens(totalsBuckets) === 0 ? null : totalsBuckets.cacheReadTokens / billedInputTokens(totalsBuckets),
       samples: billed.length,

@@ -204,6 +204,36 @@ test('token price averages only priced tokens and keeps CNY and USD apart', () =
   assert.equal(day.tokenPrice.usdMicroPerM, 3_000_000);
 });
 
+test('every model row carries its own average token price', () => {
+  const tokens = { uncachedInputTokens: 2_000_000, outputTokens: 0, cacheWriteTokens: 0, cacheReadTokens: 0 };
+  const cny = { provider: 'p', model: 'local', priceKey: 'local', priced: true, costMicroCny: 4_000_000, costMicroUsd: 0, tokens };
+  const usd = { provider: 'opencode', model: 'deepseek-v4.1-flash', priceKey: 'opencode-official', priced: true, costMicroCny: 0, costMicroUsd: 2_000_000, tokens };
+  const free = { provider: 'p', model: 'gpt-6.1-sol', priceKey: null, priced: false, costMicroCny: 0, costMicroUsd: 0, tokens };
+  const sessions = [{ costMicroCny: 4_000_000, costMicroUsd: 2_000_000, tokens, models: [cny, usd, free] }];
+
+  const rows = Object.fromEntries(aggregateRangeStats(sessions).models.map((row) => [row.model, row.tokenPrice]));
+  assert.equal(rows.local.cnyMicroPerM, 2_000_000, '4 CNY over 2M tokens');
+  assert.equal(rows.local.usdMicroPerM, 0);
+  assert.equal(rows.local.cnyTokens, 2_000_000);
+  assert.equal(rows['deepseek-v4.1-flash'].usdMicroPerM, 1_000_000, '2 USD over 2M tokens');
+  assert.equal(rows['deepseek-v4.1-flash'].cnyTokens, 0);
+  assert.equal(rows['gpt-6.1-sol'].cnyTokens, 0, 'unpriced rows count no tokens');
+  assert.equal(rows['gpt-6.1-sol'].usdTokens, 0);
+
+  // The by-day aggregation produces the same per-model figures.
+  const day = aggregateDayStats([
+    {
+      day: '2026-10-31',
+      dayStart: NOW,
+      totals: { ...tokens, totalTokens: 4_000_000, costMicroCny: 4_000_000, costMicroUsd: 2_000_000, samples: 3, cacheHit: 0 },
+      sessions: [{ id: 'a', uid: 'a', tokens, costMicroCny: 4_000_000, costMicroUsd: 2_000_000, models: [cny, usd, free] }],
+    },
+  ]);
+  const dayRows = Object.fromEntries(day.models.map((row) => [row.model, row.tokenPrice]));
+  assert.equal(dayRows.local.cnyMicroPerM, 2_000_000);
+  assert.equal(dayRows['deepseek-v4.1-flash'].usdMicroPerM, 1_000_000);
+});
+
 test('aggregateRangeStats mirrors the report summary arithmetic', () => {
   const aTokens = bucket(1000, 100, 20, 3000);
   const bTokens = bucket(2000, 200, 0, 1000);

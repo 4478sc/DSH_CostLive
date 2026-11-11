@@ -423,6 +423,7 @@ Node 22 的测试进程隔离开关仍叫 `--experimental-test-isolation`，所�
 
 ## 开发与维护
 
+- 改 README：`npm run check:readme` 会校验 `README.md` 与 `README.en.md` 的章节、代码块、表格、图片数量是否一致（CI 同样会跑）。
 - 改价格：只动 `config/pricing.json`；改峰时窗口同理，改完跑 `npm test`。
 - 加时间档 / 改边界语义：只改 `src/time-range.mjs`，Node 测试与浏览器共用同一份源码，
   不会出现「服务端一套、前端另一套」。

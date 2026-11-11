@@ -470,6 +470,7 @@ isolation switch `--experimental-test-isolation`, so that job uses `npm run test
 
 ## Development and maintenance
 
+- README changes: `npm run check:readme` verifies that `README.md` and `README.en.md` have the same sections, code blocks, tables and images; CI runs it too.
 - Price changes: only `config/pricing.json` (peak windows included); run `npm test` afterwards.
 - Range semantics or boundaries: only `src/time-range.mjs` — Node tests and the browser share one source, so
   server and client can never drift apart.
@@ -516,3 +517,9 @@ More troubleshooting in [`LIVE.md`](LIVE.md).
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Data flow, module responsibilities, invariants, extension points |
 | [`docs/DSH-TOKEN-ACCOUNTING.md`](docs/DSH-TOKEN-ACCOUNTING.md) | How DSH counts tokens (events, projections, replacement/retry rules) |
 | [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) | Development notes: pitfalls, debugging commands, acceptance checklist, ideas |
+
+---
+
+## License
+
+[MIT](LICENSE) © 2026 4478sc

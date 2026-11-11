@@ -275,7 +275,7 @@ async function main(argv) {
     console.error('dsh-cost-live: --host 不能为空');
     return 2;
   }
-  const title = options.title ?? 'DSH 会话费用 · 实时';
+  const title = options.title ?? null;
   const outPath = resolve(options.out ?? DEFAULT_OUTPUT);
   const displayHost = host === '0.0.0.0' || host === '::' ? '127.0.0.1' : host;
   const serverUrl = options['server-url'] ?? `http://${displayHost.includes(':') ? `[${displayHost}]` : displayHost}:${port}/`;

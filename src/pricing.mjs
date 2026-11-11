@@ -457,14 +457,26 @@ export function describePrice(price) {
  * Human summary of the hours a two-tier price is charged at its peak rates,
  * e.g. "Asia/Shanghai 周一至周五 09:00-12:00、14:00-18:00".
  */
-export function describePeakHours(price) {
+export function describePeakHours(price, messages) {
   if (price.peak === undefined) return null;
   const window = price.peakHours ?? DEFAULT_PEAK_HOURS;
-  const names = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
+  const english = messages !== null && messages !== undefined;
+  const names = english
+    ? ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+    : ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
+  const sep = english ? ', ' : '、';
   const days = window.weekdays;
   const isRun = days.every((day, index) => index === 0 || day === days[index - 1] + 1);
-  const dayText = isRun && days.length > 1 ? `${names[days[0] - 1]}至${names[days[days.length - 1] - 1]}` : days.map((day) => names[day - 1]).join('、');
-  const windows = (window.windows ?? []).join('、');
-  const holidays = window.holidays.length === 0 ? '' : `；${window.holidays.length} 个节假日按谷值计`;
+  const dayText =
+    isRun && days.length > 1
+      ? `${names[days[0] - 1]}${english ? '–' : '至'}${names[days[days.length - 1] - 1]}`
+      : days.map((day) => names[day - 1]).join(sep);
+  const windows = (window.windows ?? []).join(sep);
+  const holidays =
+    window.holidays.length === 0
+      ? ''
+      : english
+        ? `; ${window.holidays.length} holiday(s) at off-peak rates`
+        : `；${window.holidays.length} 个节假日按谷值计`;
   return `${window.timeZone} ${dayText} ${windows}${holidays}`;
 }

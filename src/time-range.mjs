@@ -13,6 +13,7 @@
 import { formatPercent } from './format.mjs';
 import { SORT_USD_TO_CNY, averageTokenPrice, formatMoney, formatUsd, sortCostMicro } from './money.mjs';
 import { canonicalProvider, formatCny, formatTokens } from './pricing.mjs';
+import { i18nText } from './i18n.mjs';
 
 /** One day in milliseconds; `7d`/`30d` are rolling windows ending at `now`. */
 export const DAY_MS = 86_400_000;
@@ -133,9 +134,15 @@ export function formatDay(ms) {
 }
 
 /** Human caption for one range, e.g. "最近 7 天（2026-10-18 起）". */
-export function formatRangeLabel(range, now) {
+export function formatRangeLabel(range, now, messages) {
   const normalized = normalizeTimeRange(range);
   const current = typeof now === 'number' && Number.isFinite(now) ? now : Date.now();
+  if (messages) {
+    if (normalized === 'today') return i18nText(messages, 'range.label.today', { day: formatDay(current) });
+    if (normalized === '7d') return i18nText(messages, 'range.label.7d', { from: formatDay(current - 7 * DAY_MS) });
+    if (normalized === '30d') return i18nText(messages, 'range.label.30d', { from: formatDay(current - 30 * DAY_MS) });
+    return i18nText(messages, 'range.label.all');
+  }
   if (normalized === 'today') return `今天（${formatDay(current)}）`;
   if (normalized === '7d') return `最近 7 天（${formatDay(current - 7 * DAY_MS)} 起）`;
   if (normalized === '30d') return `最近 30 天（${formatDay(current - 30 * DAY_MS)} 起）`;
@@ -143,9 +150,19 @@ export function formatRangeLabel(range, now) {
 }
 
 /** Caption for the daily view: calendar days, not rolling 24h windows. */
-export function formatDailyRangeLabel(range, now) {
+export function formatDailyRangeLabel(range, now, messages) {
   const normalized = normalizeTimeRange(range);
   const current = typeof now === 'number' && Number.isFinite(now) ? now : Date.now();
+  if (messages) {
+    if (normalized === 'today') return i18nText(messages, 'range.label.today', { day: formatDay(current) });
+    if (normalized === '7d') {
+      return i18nText(messages, 'range.label.7d.span', { from: formatDay(shiftLocalDay(localMidnight(current), -6)), to: formatDay(current) });
+    }
+    if (normalized === '30d') {
+      return i18nText(messages, 'range.label.30d.span', { from: formatDay(shiftLocalDay(localMidnight(current), -29)), to: formatDay(current) });
+    }
+    return i18nText(messages, 'range.label.all.daily');
+  }
   if (normalized === 'today') return `今天（${formatDay(current)}）`;
   if (normalized === '7d') {
     return `最近 7 天（${formatDay(shiftLocalDay(localMidnight(current), -6))} 至 ${formatDay(current)}）`;
@@ -403,15 +420,20 @@ function escapeHtml(value) {
   });
 }
 
+/** Translated string, or null when the page did not ship a message table. */
+function uiText(messages, key, params) {
+  return messages ? i18nText(messages, key, params) : null;
+}
+
 function setText(node, text) {
   if (node) node.textContent = text;
 }
 
-function renderModelTable(doc, models) {
+function renderModelTable(doc, models, messages) {
   var body = doc.getElementById('model-summary-body');
   if (!body) return;
   if (!models || models.length === 0) {
-    body.innerHTML = '<tr><td colspan="8" class="muted" style="padding:20px">没有用量记录</td></tr>';
+    body.innerHTML = '<tr><td colspan="8" class="muted" style="padding:20px">' + (uiText(messages, 'empty.usage') || '没有用量记录') + '</td></tr>';
     return;
   }
   var html = '';
@@ -419,8 +441,8 @@ function renderModelTable(doc, models) {
     var model = models[index];
     var tokens = model.tokens || {};
     var modelName = model.model === null || model.model === undefined ? 'unknown' : model.model;
-    if (model.tier === 'peak') modelName = modelName + '（峰值）';
-    else if (model.tier === 'off') modelName = modelName + '（谷值）';
+    if (model.tier === 'peak') modelName = modelName + (uiText(messages, 'model.peak') || '（峰值）');
+    else if (model.tier === 'off') modelName = modelName + (uiText(messages, 'model.off') || '（谷值）');
     html += '<tr>' +
       '<td class="mono">' + escapeHtml(modelName) + '</td>' +
       '<td class="muted">' + escapeHtml(model.provider === null || model.provider === undefined ? '—' : model.provider) + '</td>' +
@@ -428,7 +450,7 @@ function renderModelTable(doc, models) {
       '<td class="num">' + formatTokens(tokens.outputTokens || 0) + '</td>' +
       '<td class="num">' + formatTokens(tokens.cacheWriteTokens || 0) + '</td>' +
       '<td class="num">' + formatTokens(tokens.cacheReadTokens || 0) + '</td>' +
-      '<td class="num strong">' + (model.priceKey === 'opencode-pending' ? '待官网' : (model.priced ? formatMoney(model.costMicroCny, model.costMicroUsd) : '未定价')) + '</td>' +
+      '<td class="num strong">' + (model.priceKey === 'opencode-pending' ? (uiText(messages, 'cost.pending') || '待官网') : (model.priced ? formatMoney(model.costMicroCny, model.costMicroUsd) : (uiText(messages, 'cost.unpriced') || '未定价'))) + '</td>' +
       '<td class="num muted">' + model.sessions + '</td>' +
       '</tr>';
   }
@@ -480,7 +502,7 @@ function bindViewSelector(doc, onChange) {
  * only that day's share, so the cards answer "how much was spent in this
  * window" rather than "what did the sessions created in this window cost".
  */
-function applyDailyView(doc, range, now, days) {
+function applyDailyView(doc, range, now, days, messages) {
   var sessionsSection = doc.getElementById('sessions');
   if (sessionsSection) sessionsSection.setAttribute('hidden', '');
   var dailySection = doc.getElementById('daily');
@@ -513,14 +535,14 @@ function applyDailyView(doc, range, now, days) {
   var stats = aggregateDayStats(filtered);
 
   setText(doc.getElementById('stat-cost'), formatMoney(stats.costMicroCny, stats.costMicroUsd));
-  setText(doc.getElementById('stat-cost-note'), stats.sessions + ' 个会话 · ' + stats.days + ' 天（按采样）');
+  setText(doc.getElementById('stat-cost-note'), uiText(messages, 'card.cost.note.daily', { sessions: stats.sessions, days: stats.days }) || stats.sessions + ' 个会话 · ' + stats.days + ' 天（按采样）');
   setText(doc.getElementById('stat-tokens'), formatTokens(stats.totalTokens));
   setText(doc.getElementById('stat-tokens-note'), 'in ' + formatTokens(stats.uncachedInputTokens) + ' · out ' + formatTokens(stats.outputTokens));
   setText(doc.getElementById('stat-cache-read'), formatTokens(stats.cacheReadTokens));
-  setText(doc.getElementById('stat-cache-read-note'), '占计费输入 ' + formatPercent(stats.cacheHit));
+  setText(doc.getElementById('stat-cache-read-note'), uiText(messages, 'card.cacheRead.note', { percent: formatPercent(stats.cacheHit) }) || '占计费输入 ' + formatPercent(stats.cacheHit));
   setText(doc.getElementById('stat-token-price'), formatMoney(stats.tokenPrice.cnyMicroPerM, stats.tokenPrice.usdMicroPerM));
-  setText(doc.getElementById('stat-token-price-note'), '有价 token ' + formatTokens(stats.tokenPrice.cnyTokens + stats.tokenPrice.usdTokens) + ' · 未定价不计');
-  renderModelTable(doc, stats.models);
+  setText(doc.getElementById('stat-token-price-note'), uiText(messages, 'card.tokenPrice.note', { tokens: formatTokens(stats.tokenPrice.cnyTokens + stats.tokenPrice.usdTokens) }) || '有价 token ' + formatTokens(stats.tokenPrice.cnyTokens + stats.tokenPrice.usdTokens) + ' · 未定价不计');
+  renderModelTable(doc, stats.models, messages);
 
   var empty = doc.getElementById('daily-empty');
   if (empty) {
@@ -530,7 +552,9 @@ function applyDailyView(doc, range, now, days) {
 
   var note = doc.querySelector('[data-range-note]');
   if (note) {
-    note.textContent = formatDailyRangeLabel(range, now) + ' · ' + stats.sessions + ' 个会话 / ' + stats.days + ' 天';
+    note.textContent = messages
+      ? uiText(messages, 'range.note.daily', { label: formatDailyRangeLabel(range, now, messages), sessions: stats.sessions, days: stats.days })
+      : formatDailyRangeLabel(range, now) + ' · ' + stats.sessions + ' 个会话 / ' + stats.days + ' 天';
   }
   var flag = doc.querySelector('[data-range-flag]');
   if (flag) {
@@ -562,12 +586,13 @@ function applyTimeRange(doc, options) {
   var range = normalizeTimeRange(options.range);
   var view = normalizeView(options.view);
   var showAll = options.showAll === true;
+  var messages = options.messages && typeof options.messages === 'object' ? options.messages : null;
   var now = typeof options.now === 'number' && Number.isFinite(options.now) ? options.now : Date.now();
   var data = readDataset(doc);
   var allSessions = data && Array.isArray(data.sessions) ? data.sessions : null;
   var dailyDays = data && Array.isArray(data.days) ? data.days : [];
   var pageSize = data && typeof data.pageSize === 'number' && data.pageSize > 0 ? data.pageSize : 5;
-  if (view === 'daily') return applyDailyView(doc, range, now, dailyDays);
+  if (view === 'daily') return applyDailyView(doc, range, now, dailyDays, messages);
   var filtered = allSessions === null ? null : filterSessionsByRange(allSessions, range, now);
   var visible = Object.create(null);
   if (filtered !== null) {
@@ -617,14 +642,14 @@ function applyTimeRange(doc, options) {
   var stats = filtered === null ? null : aggregateRangeStats(filtered);
   if (stats !== null) {
     setText(doc.getElementById('stat-cost'), formatMoney(stats.costMicroCny, stats.costMicroUsd));
-    setText(doc.getElementById('stat-cost-note'), stats.pricedSessions + ' / ' + stats.sessions + ' 个会话产生费用');
+    setText(doc.getElementById('stat-cost-note'), uiText(messages, 'card.cost.note', { priced: stats.pricedSessions, total: stats.sessions }) || stats.pricedSessions + ' / ' + stats.sessions + ' 个会话产生费用');
     setText(doc.getElementById('stat-tokens'), formatTokens(stats.totalTokens));
     setText(doc.getElementById('stat-tokens-note'), 'in ' + formatTokens(stats.uncachedInputTokens) + ' · out ' + formatTokens(stats.outputTokens));
     setText(doc.getElementById('stat-cache-read'), formatTokens(stats.cacheReadTokens));
-    setText(doc.getElementById('stat-cache-read-note'), '占计费输入 ' + formatPercent(stats.cacheHit));
+    setText(doc.getElementById('stat-cache-read-note'), uiText(messages, 'card.cacheRead.note', { percent: formatPercent(stats.cacheHit) }) || '占计费输入 ' + formatPercent(stats.cacheHit));
     setText(doc.getElementById('stat-token-price'), formatMoney(stats.tokenPrice.cnyMicroPerM, stats.tokenPrice.usdMicroPerM));
-  setText(doc.getElementById('stat-token-price-note'), '有价 token ' + formatTokens(stats.tokenPrice.cnyTokens + stats.tokenPrice.usdTokens) + ' · 未定价不计');
-    renderModelTable(doc, stats.models);
+    setText(doc.getElementById('stat-token-price-note'), uiText(messages, 'card.tokenPrice.note', { tokens: formatTokens(stats.tokenPrice.cnyTokens + stats.tokenPrice.usdTokens) }) || '有价 token ' + formatTokens(stats.tokenPrice.cnyTokens + stats.tokenPrice.usdTokens) + ' · 未定价不计');
+    renderModelTable(doc, stats.models, messages);
   }
 
   var empty = doc.getElementById('sessions-empty');
@@ -640,16 +665,20 @@ function applyTimeRange(doc, options) {
     else more.removeAttribute('hidden');
     var toggle = doc.querySelector('[data-sessions-toggle]');
     if (toggle) {
-      var moreLabel = extraCount > 0 ? '显示更多（还有 ' + extraCount + ' 个）' : '显示更多';
+      var moreLabel = extraCount > 0 ? (uiText(messages, 'more.show', { count: extraCount }) || '显示更多（还有 ' + extraCount + ' 个）') : (uiText(messages, 'more.show.plain') || '显示更多');
       toggle.setAttribute('data-more-label', moreLabel);
-      toggle.textContent = showAll && extraCount > 0 ? '收起' : moreLabel;
+      toggle.textContent = showAll && extraCount > 0 ? (uiText(messages, 'more.less') || '收起') : moreLabel;
       toggle.setAttribute('aria-expanded', showAll && extraCount > 0 ? 'true' : 'false');
     }
   }
 
   var note = doc.querySelector('[data-range-note]');
   if (note) {
-    note.textContent = formatRangeLabel(range, now) + ' · ' + kept + (range === 'all' ? ' 个会话' : ' / ' + total + ' 个会话');
+    note.textContent = messages
+      ? (range === 'all'
+          ? uiText(messages, 'range.note.all', { count: kept })
+          : uiText(messages, 'range.note.range', { label: formatRangeLabel(range, now, messages), kept: kept }))
+      : formatRangeLabel(range, now) + ' · ' + kept + (range === 'all' ? ' 个会话' : ' / ' + total + ' 个会话');
   }
   var flag = doc.querySelector('[data-range-flag]');
   if (flag) {
@@ -729,6 +758,7 @@ export function timeRangeRuntimeSource() {
     sessionMatchesRange,
     dayMatchesRange,
     filterSessionsByRange,
+    i18nText,
     formatDay,
     formatRangeLabel,
     formatDailyRangeLabel,

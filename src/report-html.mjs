@@ -5,6 +5,7 @@ import { canonicalProvider, describePeakHours, formatCny, formatTokens } from '.
 import { formatPercent, formatTime } from './format.mjs';
 import { buildTimeRangeDataset, modelCacheSavingMicro } from './report-data.mjs';
 import { formatDay, formatRangeLabel, timeRangeRuntimeSource } from './time-range.mjs';
+import { MESSAGES, normalizeLocale, sourceLabel, t } from './i18n.mjs';
 
 const ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
 
@@ -30,19 +31,20 @@ function money(cnyMicro, usdMicro) {
  * Cost cell for one model row. Official-provider usage without a console row
  * yet is "pending official bill", not a missing CNY price.
  */
-function modelCostText(model) {
-  if (model.priceKey === 'opencode-pending') return '待官网';
-  return model.priced ? money(model.costMicroCny, model.costMicroUsd) : '未定价';
+function modelCostText(model, tr) {
+  if (model.priceKey === 'opencode-pending') return tr('cost.pending');
+  return model.priced ? money(model.costMicroCny, model.costMicroUsd) : tr('cost.unpriced');
 }
 
 /**
  * Display label for one model row. Two-tier models (DeepSeek peak/off-peak)
  * are split into separate rows, so the tier is part of the name.
  */
-export function modelLabel(model) {
+export function modelLabel(model, tr) {
   const name = model?.model ?? 'unknown';
-  if (model?.tier === 'peak') return `${name}（峰值）`;
-  if (model?.tier === 'off') return `${name}（谷值）`;
+  const suffix = (key) => (typeof tr === 'function' ? tr(key) : key === 'model.peak' ? '（峰值）' : '（谷值）');
+  if (model?.tier === 'peak') return `${name}${suffix('model.peak')}`;
+  if (model?.tier === 'off') return `${name}${suffix('model.off')}`;
   return name;
 }
 
@@ -110,7 +112,9 @@ function bar(value, max, className = '') {
 }
 
 /** Build the complete standalone HTML document. */
-export function renderHtml(report) {
+export function renderHtml(report, options = {}) {
+  const locale = normalizeLocale(options.locale);
+  const tr = (key, params) => t(locale, key, params);
   const { summary, pricing } = report;
   // Render from a sorted copy: running main -> running subagent -> completed,
   // with the existing cost/time order preserved inside each bucket. Running
@@ -126,10 +130,15 @@ export function renderHtml(report) {
   const multiSource = sources.length > 1;
   const sourceErrors = sources.filter((source) => source.error !== null && source.error !== undefined);
   const sourceBadge = (label) =>
-    multiSource && label ? `<span class="chip chip-source">${escapeHtml(label)}</span>` : '';
+    multiSource && label ? `<span class="chip chip-source">${escapeHtml(sourceLabel(label, locale))}</span>` : '';
   const sourceText =
     sources.length > 0
-      ? sources.map((source) => `${source.label}: ${source.home}${source.error ? '（不可用）' : ''}`).join(' · ')
+      ? sources
+          .map(
+            (source) =>
+              `${sourceLabel(source.label, locale)}: ${source.home}${source.error ? tr('source.unavailable') : ''}`,
+          )
+          .join(' · ')
       : report.home;
   const models = aggregateModels(sessions, pricing);
   const billable = summary.inputTokens + summary.cacheWriteTokens + summary.cacheReadTokens;
@@ -142,12 +151,12 @@ export function renderHtml(report) {
   // dataset locally, so one report serves all four time ranges and no-JS still
   // sees the complete server render.
   const datasetJson = JSON.stringify(buildReportDataset(report)).replace(/</gu, '\\u003c');
-  const rangeNote = `${formatRangeLabel('all', report.generatedAt)} · ${sessions.length} 个会话`;
+  const rangeNote = tr('range.note.all', { count: sessions.length });
 
   const priceRows = Object.entries(pricing.models)
     .map(
       ([id, price]) => `<tr>
-        <td class="mono">${escapeHtml(id)}${price.peak === undefined ? '' : ' <span class="muted">· 谷值</span>'}</td>
+        <td class="mono">${escapeHtml(id)}${price.peak === undefined ? '' : ` <span class="muted">${tr('model.offpeakTag')}</span>`}</td>
         <td class="num">${price.input}</td>
         <td class="num">${price.output}</td>
         <td class="num">${price.cacheWrite}</td>
@@ -162,20 +171,30 @@ export function renderHtml(report) {
     .filter(([, price]) => price.peak !== undefined)
     .map(([id, price]) => {
       const peak = price.peak;
-      return `<div class="note">${escapeHtml(id)} 峰值时段：输入 ${peak.input} · 输出 ${peak.output} · 缓存创建 ${peak.cacheWrite} · 缓存读取 ${peak.cacheRead}（${escapeHtml(report.currency)} / 1M）。峰值时段 ${escapeHtml(describePeakHours(price) ?? '')}，其余时间为谷值价。</div>`;
+      return `<div class="note">${escapeHtml(
+        tr('tariff.peak', {
+          id,
+          input: peak.input,
+          output: peak.output,
+          cacheWrite: peak.cacheWrite,
+          cacheRead: peak.cacheRead,
+          currency: report.currency,
+          hours: describePeakHours(price, locale === 'en' ? MESSAGES.en : null) ?? '',
+        }),
+      )}</div>`;
     })
     .join('');
 
   const modelRows = models
     .map(
       (model) => `<tr>
-        <td class="mono">${escapeHtml(modelLabel(model))}</td>
+        <td class="mono">${escapeHtml(modelLabel(model, tr))}</td>
         <td class="muted">${escapeHtml(model.provider ?? '—')}</td>
         <td class="num">${formatTokens(model.tokens.uncachedInputTokens)}</td>
         <td class="num">${formatTokens(model.tokens.outputTokens)}</td>
         <td class="num">${formatTokens(model.tokens.cacheWriteTokens)}</td>
         <td class="num">${formatTokens(model.tokens.cacheReadTokens)}</td>
-        <td class="num strong">${modelCostText(model)}</td>
+        <td class="num strong">${modelCostText(model, tr)}</td>
         <td class="num muted">${model.sessions.size}</td>
       </tr>`,
     )
@@ -193,25 +212,25 @@ export function renderHtml(report) {
       const detailClass = ['detail', extra ? 'session-extra' : ''].filter(Boolean).join(' ');
       const hiddenAttr = extra ? ' hidden' : '';
       const flags = [
-        running ? '<span class="pill pill-run"><i aria-hidden="true"></i>运行中</span>' : '',
-        subagent ? '<span class="pill pill-sub">子代理</span>' : '',
+        running ? `<span class="pill pill-run"><i aria-hidden="true"></i>${tr('pill.running')}</span>` : '',
+        subagent ? `<span class="pill pill-sub">${tr('pill.subagent')}</span>` : '',
       ].join('');
       const modelChips = session.models
         .map(
           (model) =>
-            `<span class="chip ${model.priced ? '' : 'chip-warn'}">${escapeHtml(modelLabel(model))}</span>`,
+            `<span class="chip ${model.priced ? '' : 'chip-warn'}">${escapeHtml(modelLabel(model, tr))}</span>`,
         )
         .join('');
       const detailModels = session.models
         .map(
           (model) => `<tr>
-            <td class="mono">${escapeHtml(modelLabel(model))}</td>
+            <td class="mono">${escapeHtml(modelLabel(model, tr))}</td>
             <td class="muted">${escapeHtml(model.provider ?? '—')}</td>
             <td class="num">${formatTokens(model.tokens.uncachedInputTokens)}</td>
             <td class="num">${formatTokens(model.tokens.outputTokens)}</td>
             <td class="num">${formatTokens(model.tokens.cacheWriteTokens)}</td>
             <td class="num">${formatTokens(model.tokens.cacheReadTokens)}</td>
-            <td class="num strong">${modelCostText(model)}</td>
+            <td class="num strong">${modelCostText(model, tr)}</td>
             <td class="num muted">${formatPercent(model.share)}</td>
           </tr>`,
         )
@@ -226,7 +245,7 @@ export function renderHtml(report) {
           <td>${modelChips || '<span class="muted">—</span>'}</td>
           <td class="num">${formatTokens(session.totals.totalTokens)}</td>
           <td class="cost-cell">
-            <span class="strong">${session.officialPending === true ? '<span class="muted">待官网</span>' : session.totals.costMicroCny > 0 || session.totals.costMicroUsd > 0 ? money(session.totals.costMicroCny, session.totals.costMicroUsd) : '<span class="muted">—</span>'}</span>
+            <span class="strong">${session.officialPending === true ? `<span class="muted">${tr('cost.pending')}</span>` : session.totals.costMicroCny > 0 || session.totals.costMicroUsd > 0 ? money(session.totals.costMicroCny, session.totals.costMicroUsd) : '<span class="muted">—</span>'}</span>
             ${bar(sortCostMicro(session.totals), maxCost)}
           </td>
         </tr>
@@ -234,15 +253,15 @@ export function renderHtml(report) {
           <td colspan="5">
             <div class="detail-inner">
               <div class="detail-meta">
-                <span>状态 ${escapeHtml(activityLabel({ running, isSubagent: subagent }))}</span>
-                <span>工作区 <code>${escapeHtml(session.cwd ?? session.workspaceDir)}</code></span>
-                <span>预设 ${escapeHtml(session.agentPreset ?? '—')}</span>
-                <span>缓存命中 ${formatPercent(session.totals.cacheHit)}</span>
-                <span>计费采样 ${session.totals.samples} 次</span>
+                <span>${tr('detail.status')} ${escapeHtml(activityLabel({ running, isSubagent: subagent }, locale === 'en' ? MESSAGES.en : null))}</span>
+                <span>${tr('detail.workspace')} <code>${escapeHtml(session.cwd ?? session.workspaceDir)}</code></span>
+                <span>${tr('detail.preset')} ${escapeHtml(session.agentPreset ?? '—')}</span>
+                <span>${tr('detail.cacheHit')} ${formatPercent(session.totals.cacheHit)}</span>
+                <span>${tr('detail.samples', { count: session.totals.samples })}</span>
               </div>
               <table class="mini">
-                <thead><tr><th>模型</th><th>提供方</th><th class="num">输入</th><th class="num">输出</th><th class="num">缓存写</th><th class="num">缓存读</th><th class="num">费用</th><th class="num">占比</th></tr></thead>
-                <tbody>${detailModels || '<tr><td colspan="8" class="muted">没有用量记录</td></tr>'}</tbody>
+                <thead><tr><th>${tr('table.model')}</th><th>${tr('table.provider')}</th><th class="num">${tr('table.input')}</th><th class="num">${tr('table.output')}</th><th class="num">${tr('table.cacheWrite')}</th><th class="num">${tr('table.cacheRead')}</th><th class="num">${tr('table.cost')}</th><th class="num">${tr('cost.share')}</th></tr></thead>
+                <tbody>${detailModels || `<tr><td colspan="8" class="muted">${tr('empty.usage')}</td></tr>`}</tbody>
               </table>
             </div>
           </td>
@@ -253,14 +272,14 @@ export function renderHtml(report) {
   const dailyRows = dailyDays
     .map((day, index) => {
       const target = `d${index}`;
-      const label = day.unknown ? '未知日期' : day.day;
+      const label = day.unknown ? tr('day.unknown') : day.day;
       const isToday = day.unknown !== true && day.day === todayKey;
       const daySessionRows = day.sessions
         .map((session) => {
           const chips = session.models
             .map(
               (model) =>
-                `<span class="chip ${model.priced ? '' : 'chip-warn'}">${escapeHtml(modelLabel(model))}</span>`,
+                `<span class="chip ${model.priced ? '' : 'chip-warn'}">${escapeHtml(modelLabel(model, tr))}</span>`,
             )
             .join('');
           return `<tr>
@@ -273,7 +292,7 @@ export function renderHtml(report) {
         })
         .join('');
       return `<tr class="day" data-target="${target}" data-day-start="${day.dayStart}" data-unknown="${day.unknown === true}">
-          <td class="nowrap"><span class="strong">${escapeHtml(label)}</span>${isToday ? ' <span class="pill pill-today">今天</span>' : ''}</td>
+          <td class="nowrap"><span class="strong">${escapeHtml(label)}</span>${isToday ? ` <span class="pill pill-today">${tr('pill.today')}</span>` : ''}</td>
           <td class="num">${day.sessions.length}</td>
           <td class="num">${formatTokens(day.totals.totalTokens)}</td>
           <td class="num">${formatPercent(day.totals.cacheHit)}</td>
@@ -285,10 +304,10 @@ export function renderHtml(report) {
         <tr class="detail" id="${target}" data-day-start="${day.dayStart}" hidden>
           <td colspan="5">
             <div class="detail-inner">
-              <div class="detail-meta"><span>按采样时间切日 · 跨天会话只计入当天部分</span></div>
+              <div class="detail-meta"><span>${tr('day.hint')}</span></div>
               <table class="mini">
-                <thead><tr><th>会话</th><th>模型</th><th class="num">Token</th><th class="num">采样</th><th class="num">费用</th></tr></thead>
-                <tbody>${daySessionRows || '<tr><td colspan="5" class="muted">没有用量记录</td></tr>'}</tbody>
+                <thead><tr><th>${tr('table.session')}</th><th>${tr('table.model')}</th><th class="num">${tr('table.token')}</th><th class="num">${tr('table.samples')}</th><th class="num">${tr('table.cost')}</th></tr></thead>
+                <tbody>${daySessionRows || `<tr><td colspan="5" class="muted">${tr('empty.usage')}</td></tr>`}</tbody>
               </table>
             </div>
           </td>
@@ -296,11 +315,11 @@ export function renderHtml(report) {
     })
     .join('');
 
-  const runningNote = runningCount > 0 ? ` · 当前 ${runningCount} 个运行中` : '';
-  const moreLabel = `显示更多（还有 ${hiddenCount} 个）`;
+  const runningNote = runningCount > 0 ? tr('section.running', { count: runningCount }) : '';
+  const moreLabel = tr('more.show', { count: hiddenCount });
   const unpricedNote =
     unpriced.length > 0
-      ? `<div class="note warn">未配置价格的模型：${unpriced.map(escapeHtml).join('、')}。其 token 正常统计，但费用记为 0。</div>`
+      ? `<div class="note warn">${tr('note.unpriced', { models: unpriced.map(escapeHtml).join(locale === 'en' ? ', ' : '、') })}</div>`
       : '';
   const official = report.official ?? null;
   const officialWindows = report.official?.windows ?? null;
@@ -308,32 +327,46 @@ export function renderHtml(report) {
   const storeAgeMinutes =
     storeUpdatedAt === null ? null : Math.max(0, Math.round((report.generatedAt - storeUpdatedAt) / 60000));
   const storeAgeText =
-    storeAgeMinutes === null ? '' : storeAgeMinutes < 1 ? '刚刚同步' : `${storeAgeMinutes} 分钟前同步`;
+    storeAgeMinutes === null
+      ? ''
+      : storeAgeMinutes < 1
+        ? tr('note.storeAge.justNow')
+        : tr('note.storeAge.minutes', { count: storeAgeMinutes });
   const staleStore = storeAgeMinutes !== null && storeAgeMinutes >= 5;
   const consoleNote =
     officialWindows !== null
-      ? `<div class="note${staleStore ? ' warn' : ''}">官方口径：今天 ${formatUsd(officialWindows.today)}（本地日）· 7 天 ${formatUsd(officialWindows['7d'])} · 30 天 ${formatUsd(officialWindows['30d'])}（滚动 24 小时 ×N，与官网一致）。本页按自然日切分，7 天窗口会比官网略小。归档 ${storeAgeText}${staleStore ? '——同步循环可能已停止，请在服务端执行 vm/ensure.sh（或重跑 opencode-sync --loop，日志见 logs/sync.log）' : ''}。</div>`
+      ? `<div class="note${staleStore ? ' warn' : ''}">${tr('note.console', {
+          today: formatUsd(officialWindows.today),
+          seven: formatUsd(officialWindows['7d']),
+          thirty: formatUsd(officialWindows['30d']),
+          age: storeAgeText,
+          stale: staleStore ? tr('note.console.stale') : '',
+        })}</div>`
       : '';
   const pendingCount = sessions.filter((session) => session.officialPending === true).length;
   const pendingNote =
     pendingCount === 0
       ? ''
-      : '<div class="note">待官网：' + pendingCount + ' 个会话走 opencode 官方计费但归档里还没有对应请求记录，费用不再按 CNY 价表估算；同步循环补齐后自动变成 $ 金额。</div>';
+      : `<div class="note">${tr('note.pending', { count: pendingCount })}</div>`;
   const officialNote =
     official !== null && official.sessions > 0
-      ? `<div class="note">官方用量：${official.sessions} 个会话的 token 与费用取自 OpenCode 控制台日志（${official.requests} 条请求，按 USD 计费，不折算），本地归档仅作备份。</div>`
+      ? `<div class="note">${tr('note.official', { sessions: official.sessions, requests: official.requests })}</div>`
       : '';
   const sourceErrorNote =
     sourceErrors.length > 0
-      ? `<div class="note warn">数据源不可用：${sourceErrors.map((source) => `${escapeHtml(source.label)}（${escapeHtml(source.home)}）`).join('、')}。请检查镜像是否已同步，或运行 dsh-cost-vm-sync.cmd。</div>`
+      ? `<div class="note warn">${tr('note.sourceError', {
+          sources: sourceErrors
+            .map((source) => `${escapeHtml(sourceLabel(source.label, locale))} (${escapeHtml(source.home)})`)
+            .join(locale === 'en' ? ', ' : '、'),
+        })}</div>`
       : '';
 
   return `<!doctype html>
-<html lang="zh-CN">
+<html lang="${locale === 'en' ? 'en' : 'zh-CN'}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>DSH 会话费用报告 · ${escapeHtml(formatTime(report.generatedAt))}</title>
+<title>${escapeHtml(tr('app.pageTitle', { time: formatTime(report.generatedAt) }))}</title>
 <style>
   :root {
     --bg: #f4f6f9;
@@ -361,6 +394,9 @@ export function renderHtml(report) {
   .sub { color: var(--muted); font-size: 13px; }
   .sub code { font-family: var(--mono); font-size: 12px; color: var(--text); background: #eef1f5; padding: 2px 6px; border-radius: 5px; }
   .badge { background: var(--accent-soft); color: var(--accent); border-radius: 999px; padding: 5px 12px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+  .hero-side { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .lang-link { font-size: 12px; color: var(--muted); text-decoration: none; border: 1px solid var(--line); border-radius: 999px; padding: 4px 11px; background: var(--card); }
+  .lang-link:hover { color: var(--accent); border-color: var(--accent); }
   .cards { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin: 20px 0 26px; }
   .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px 18px; box-shadow: var(--shadow); }
   .card .k { color: var(--muted); font-size: 12px; }
@@ -485,48 +521,51 @@ export function renderHtml(report) {
 <div class="wrap">
   <div class="hero">
     <div>
-      <div class="eyebrow">DeepSeek Harness · Cost Report</div>
-      <h1>会话费用报告</h1>
-      <div class="sub">生成于 ${escapeHtml(formatTime(report.generatedAt))} · 数据源 <code>${escapeHtml(sourceText)}</code></div>
+      <div class="eyebrow">${escapeHtml(tr('app.eyebrow'))}</div>
+      <h1>${escapeHtml(tr('app.heading'))}</h1>
+      <div class="sub">${tr('app.generated', { time: escapeHtml(formatTime(report.generatedAt)), source: `<code>${escapeHtml(sourceText)}</code>` })}</div>
     </div>
-    <div class="badge">${escapeHtml(report.currency)} · ${formatTokens(report.unitTokens)} tokens 计价</div>
+    <div class="hero-side">
+      <div class="badge">${escapeHtml(tr('app.badge', { currency: report.currency, tokens: formatTokens(report.unitTokens) }))}</div>
+      <a class="lang-link" data-lang-link href="?lang=${locale === 'en' ? 'zh' : 'en'}" title="${escapeHtml(tr('lang.switchLabel'))}">${escapeHtml(tr('lang.switch'))}</a>
+    </div>
   </div>
 
   <div class="range-bar" id="dsh-cost-range" data-filtered="false">
-    <div class="time-range-selector" role="group" aria-label="时间范围">
+    <div class="time-range-selector" role="group" aria-label="${escapeHtml(tr('range.group'))}">
       <button type="button" class="range-btn active" data-range="all" aria-pressed="true">All time</button>
       <button type="button" class="range-btn" data-range="30d" aria-pressed="false">Last 30 days</button>
       <button type="button" class="range-btn" data-range="7d" aria-pressed="false">Last 7 days</button>
       <button type="button" class="range-btn" data-range="today" aria-pressed="false">Today</button>
     </div>
-    <div class="view-selector" role="group" aria-label="统计视图">
-      <button type="button" class="view-btn active" data-view="session" aria-pressed="true">按会话</button>
-      <button type="button" class="view-btn" data-view="daily" aria-pressed="false">按天</button>
+    <div class="view-selector" role="group" aria-label="${escapeHtml(tr('view.group'))}">
+      <button type="button" class="view-btn active" data-view="session" aria-pressed="true">${escapeHtml(tr('view.session'))}</button>
+      <button type="button" class="view-btn" data-view="daily" aria-pressed="false">${escapeHtml(tr('view.daily'))}</button>
     </div>
-    <span class="range-flag" data-range-flag hidden>已筛选</span>
+    <span class="range-flag" data-range-flag hidden>${escapeHtml(tr('range.flag'))}</span>
     <span class="range-note" data-range-note aria-live="polite">${escapeHtml(rangeNote)}</span>
   </div>
 
   <div class="cards">
     <div class="card money">
-      <div class="k">总费用</div>
+      <div class="k">${escapeHtml(tr('card.cost'))}</div>
       <div class="v" id="stat-cost">${money(summary.costMicroCny, summary.costMicroUsd)}</div>
-      <div class="f" id="stat-cost-note">${pricedCount} / ${summary.sessions} 个会话产生费用</div>
+      <div class="f" id="stat-cost-note">${escapeHtml(tr('card.cost.note', { priced: pricedCount, total: summary.sessions }))}</div>
     </div>
     <div class="card">
-      <div class="k">总 Token</div>
+      <div class="k">${escapeHtml(tr('card.tokens'))}</div>
       <div class="v" id="stat-tokens">${formatTokens(summary.totalTokens)}</div>
       <div class="f" id="stat-tokens-note">in ${formatTokens(summary.inputTokens)} · out ${formatTokens(summary.outputTokens)}</div>
     </div>
     <div class="card">
-      <div class="k">缓存读取</div>
+      <div class="k">${escapeHtml(tr('card.cacheRead'))}</div>
       <div class="v" id="stat-cache-read">${formatTokens(summary.cacheReadTokens)}</div>
-      <div class="f" id="stat-cache-read-note">占计费输入 ${formatPercent(summary.cacheHit)}</div>
+      <div class="f" id="stat-cache-read-note">${escapeHtml(tr('card.cacheRead.note', { percent: formatPercent(summary.cacheHit) }))}</div>
     </div>
     <div class="card">
-      <div class="k">Token均价</div>
+      <div class="k">${escapeHtml(tr('card.tokenPrice'))}</div>
       <div class="v" id="stat-token-price">${money(tokenPrice.cnyMicroPerM, tokenPrice.usdMicroPerM)}</div>
-      <div class="f" id="stat-token-price-note">有价 token ${formatTokens(pricedTokenCount)} · 未定价不计</div>
+      <div class="f" id="stat-token-price-note">${escapeHtml(tr('card.tokenPrice.note', { tokens: formatTokens(pricedTokenCount) }))}</div>
     </div>
   </div>
 
@@ -536,25 +575,25 @@ export function renderHtml(report) {
   ${consoleNote}
 
   <section>
-    <h2>按模型汇总</h2>
+    <h2>${escapeHtml(tr('section.models'))}</h2>
     <div class="table-wrap">
       <table>
         <thead>
-          <tr><th>模型</th><th>提供方</th><th class="num">输入</th><th class="num">输出</th><th class="num">缓存写</th><th class="num">缓存读</th><th class="num">费用</th><th class="num">会话</th></tr>
+          <tr><th>${tr('table.model')}</th><th>${tr('table.provider')}</th><th class="num">${tr('table.input')}</th><th class="num">${tr('table.output')}</th><th class="num">${tr('table.cacheWrite')}</th><th class="num">${tr('table.cacheRead')}</th><th class="num">${tr('table.cost')}</th><th class="num">${tr('table.sessions')}</th></tr>
         </thead>
-        <tbody id="model-summary-body">${modelRows || '<tr><td colspan="8" class="muted" style="padding:20px">没有用量记录</td></tr>'}</tbody>
+        <tbody id="model-summary-body">${modelRows || `<tr><td colspan="8" class="muted" style="padding:20px">${tr('empty.usage')}</td></tr>`}</tbody>
       </table>
     </div>
   </section>
 
   <section id="sessions">
-    <h2>会话明细（按创建时间 · 运行中优先${runningNote} · 点击行展开模型明细）</h2>
+    <h2>${tr('section.sessions', { running: runningNote })}</h2>
     <div class="table-wrap">
       <table>
         <thead>
-          <tr><th>日期</th><th>会话</th><th>模型</th><th class="num">Token</th><th class="cost-cell">费用</th></tr>
+          <tr><th>${tr('table.date')}</th><th>${tr('table.session')}</th><th>${tr('table.model')}</th><th class="num">${tr('table.token')}</th><th class="cost-cell">${tr('table.cost')}</th></tr>
         </thead>
-        <tbody>${sessionRows}<tr id="sessions-empty" class="empty-row"${sessions.length === 0 ? '' : ' hidden'}><td colspan="5" class="muted">无符合条件的会话</td></tr></tbody>
+        <tbody>${sessionRows}<tr id="sessions-empty" class="empty-row"${sessions.length === 0 ? '' : ' hidden'}><td colspan="5" class="muted">${tr('empty.sessions')}</td></tr></tbody>
       </table>
     </div>
     ${
@@ -565,35 +604,36 @@ export function renderHtml(report) {
   </section>
 
   <section id="daily" hidden>
-    <h2>按天费用（按采样时间切日 · 跨天会话会拆分 · 点击行展开当天会话）</h2>
+    <h2>${escapeHtml(tr('section.daily'))}</h2>
     <div class="table-wrap">
       <table>
         <thead>
-          <tr><th>日期</th><th class="num">会话</th><th class="num">Token</th><th class="num">缓存命中</th><th class="cost-cell">费用</th></tr>
+          <tr><th>${tr('table.date')}</th><th class="num">${tr('table.sessions')}</th><th class="num">${tr('table.token')}</th><th class="num">${tr('table.cacheHit')}</th><th class="cost-cell">${tr('table.cost')}</th></tr>
         </thead>
-        <tbody>${dailyRows}<tr id="daily-empty" class="empty-row"${dailyDays.length === 0 ? '' : ' hidden'}><td colspan="5" class="muted">无符合条件的花费</td></tr></tbody>
+        <tbody>${dailyRows}<tr id="daily-empty" class="empty-row"${dailyDays.length === 0 ? '' : ' hidden'}><td colspan="5" class="muted">${tr('empty.daily')}</td></tr></tbody>
       </table>
     </div>
-    <div class="note">按采样时间切日，同一会话跨天会拆分到两天；按天视图下 Today / 7 天 / 30 天按自然日计算（含今天），边界使用本机时区。</div>
+    <div class="note">${escapeHtml(tr('section.daily.hint'))}</div>
   </section>
 
   <section>
-    <h2>价格表（${escapeHtml(report.currency)} / ${formatTokens(report.unitTokens)} tokens）</h2>
+    <h2>${escapeHtml(tr('section.price', { currency: report.currency, tokens: formatTokens(report.unitTokens) }))}</h2>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>模型</th><th class="num">输入</th><th class="num">输出</th><th class="num">缓存创建</th><th class="num">缓存读取</th></tr></thead>
+        <thead><tr><th>${tr('table.model')}</th><th class="num">${tr('table.input')}</th><th class="num">${tr('table.output')}</th><th class="num">${tr('table.cacheCreate')}</th><th class="num">${tr('table.cacheReadLong')}</th></tr></thead>
         <tbody>${priceRows}</tbody>
       </table>
     </div>
     ${tariffNotes}
-    <div class="note">未定价模型仍统计 token，但费用记为 0。模型 id 匹配忽略 provider 前缀与日期后缀，并支持 <code>*</code> 前缀通配。</div>
+    <div class="note">${tr('section.price.note')}</div>
   </section>
 
   <footer>
-    由 <code>dsh-cost</code> 生成 · 计费口径与 DSH <code>tokenUsage</code> 投影一致（同一步骤的最终样本替换流式样本，重试计为独立样本）<br>
-    费用为按公开价格估算，非账单凭证。
+    ${tr('footer.generated')}<br>
+    ${escapeHtml(tr('footer.disclaimer'))}
   </footer>
   <script type="application/json" id="dsh-cost-data">${datasetJson}</script>
+  <script type="application/json" id="dsh-cost-i18n">${JSON.stringify({ locale, messages: MESSAGES[locale] }).replace(/</gu, '\\u003c')}</script>
 </div>
 <script>
 ${timeRangeRuntimeSource()}
@@ -606,6 +646,14 @@ ${timeRangeRuntimeSource()}
     } catch (error) {
       storage = null;
     }
+    var i18n = { locale: 'zh', messages: {} };
+    try {
+      var i18nEl = document.getElementById('dsh-cost-i18n');
+      if (i18nEl) i18n = JSON.parse(i18nEl.textContent);
+    } catch (error) {
+      i18n = { locale: 'zh', messages: {} };
+    }
+    window.__DSH_I18N__ = i18n;
     var range = runtime.normalizeTimeRange(urlParam('range') || runtime.readSavedRange(storage));
     var view = runtime.normalizeView(urlParam('view') || runtime.readSavedView(storage));
     var expanded = false;
@@ -627,7 +675,7 @@ ${timeRangeRuntimeSource()}
       }
     }
     function applyView() {
-      runtime.applyTimeRange(document, { range: range, showAll: expanded, view: view });
+      runtime.applyTimeRange(document, { range: range, showAll: expanded, view: view, messages: i18n.messages });
     }
     runtime.bindRangeSelector(document, function (next) {
       range = next;

@@ -24,6 +24,7 @@ import {
   renderLiveFragment,
   summarizeReport,
 } from './live.mjs';
+import { localeFromAcceptLanguage, normalizeLocale } from './i18n.mjs';
 
 const JSON_HEADERS = {
   'Content-Type': 'application/json; charset=utf-8',
@@ -128,9 +129,16 @@ export async function startLiveServer(options = {}) {
     reportOptions = {},
     open = false,
     portFallback = true,
-    title = 'DSH 会话费用 · 实时',
+    title = null,
     logger = console,
+    locale: rawLocale = null,
   } = options;
+  // Server default locale: --lang / DSH_COST_LANG, else zh; a request can still
+  // override it with ?lang= or Accept-Language.
+  const defaultLocale = normalizeLocale(rawLocale ?? 'zh');
+  // With no explicit title, each render falls back to app.title in its own
+  // locale (see renderLiveDocument), so an English page gets an English title.
+  const pageTitle = typeof title === 'string' && title !== '' ? title : null;
 
   const startedAt = Date.now();
   const warned = new Set();
@@ -189,8 +197,8 @@ export async function startLiveServer(options = {}) {
       scans += 1;
       lastScanMs = scanMs;
       lastError = null;
-      const fragment = renderLiveFragment(report);
-      const page = renderLiveDocument({ report, mode: 'http', intervalMs, title, serverUrl: null });
+      const fragment = renderLiveFragment(report, { locale: defaultLocale });
+      const page = renderLiveDocument({ report, mode: 'http', intervalMs, title: pageTitle, serverUrl: null, locale: defaultLocale });
       const previous = cache?.report ?? null;
       cache = { at: Date.now(), report, fragment, page, error: null };
       logChange(previous, report, scanMs);
@@ -216,21 +224,46 @@ export async function startLiveServer(options = {}) {
     }
     const headOnly = method === 'HEAD';
     let pathname = '/';
+    let query = new URLSearchParams();
     try {
-      pathname = new URL(request.url ?? '/', 'http://127.0.0.1').pathname;
+      const url = new URL(request.url ?? '/', 'http://127.0.0.1');
+      pathname = url.pathname;
+      query = url.searchParams;
     } catch {
       sendText(response, 400, 'Bad Request');
       return;
     }
+    // `?lang=en` wins, then Accept-Language, then the default (zh).
+    const requested = query.get('lang');
+    const locale =
+      requested !== null && requested !== ''
+        ? normalizeLocale(requested)
+        : localeFromAcceptLanguage(request.headers['accept-language'] ?? '');
 
     try {
       if (pathname === '/' || pathname === '/index.html') {
         const current = refresh(false);
-        sendHtml(response, 200, current.page, headOnly);
+        const page = locale === defaultLocale ? current.page : renderLiveDocument({ report: current.report, mode: 'http', intervalMs, title: pageTitle, serverUrl: null, locale });
+        sendHtml(response, 200, page, headOnly);
         return;
       }
       if (pathname === '/api/fragment') {
         const current = refresh(false);
+        if (locale !== defaultLocale) {
+          sendJson(
+            response,
+            200,
+            {
+              ...renderLiveFragment(current.report, { locale }),
+              intervalMs,
+              stale: Boolean(current.error),
+              error: current.error ?? null,
+              scans,
+            },
+            headOnly,
+          );
+          return;
+        }
         sendJson(
           response,
           200,

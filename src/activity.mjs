@@ -15,6 +15,7 @@
  */
 
 import { sortCostMicro } from './money.mjs';
+import { i18nText } from './i18n.mjs';
 
 export const ACTIVITY_RUNNING_MAIN = 0;
 export const ACTIVITY_RUNNING_SUBAGENT = 1;
@@ -72,7 +73,11 @@ export function activityRank(activity) {
 }
 
 /** Human-readable state for tooltips / terminal details. */
-export function activityLabel(activity) {
+export function activityLabel(activity, messages) {
+  if (messages) {
+    if (activity?.running === true) return i18nText(messages, activity.isSubagent === true ? 'activity.runningSub' : 'activity.runningMain');
+    return i18nText(messages, activity?.isSubagent === true ? 'activity.doneSub' : 'activity.done');
+  }
   if (activity?.running === true) return activity.isSubagent === true ? '运行中（子代理）' : '运行中（主会话）';
   return activity?.isSubagent === true ? '已完成（子代理）' : '已完成';
 }

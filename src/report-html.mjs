@@ -4,13 +4,14 @@ import { averageTokenPrice, formatMoney, formatUsd, sortCostMicro } from './mone
 import { canonicalProvider, describePeakHours, formatCny, formatTokens } from './pricing.mjs';
 import { formatPercent, formatTime } from './format.mjs';
 import { buildTimeRangeDataset, modelCacheSavingMicro } from './report-data.mjs';
-import { formatDay, formatRangeLabel, timeRangeRuntimeSource } from './time-range.mjs';
+import { DAILY_PAGE_SIZE, formatDay, formatRangeLabel, timeRangeRuntimeSource } from './time-range.mjs';
 import { MESSAGES, normalizeLocale, sourceLabel, t } from './i18n.mjs';
 
 const ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
 
 /** Session rows rendered without expanding: running sessions sort into this window first. */
 export const SESSION_PAGE_SIZE = 5;
+
 
 /** HTML-escape one value. */
 export function escapeHtml(value) {
@@ -269,6 +270,9 @@ export function renderHtml(report, options = {}) {
     })
     .join('');
 
+  const dailyHiddenCount = Math.max(0, dailyDays.length - DAILY_PAGE_SIZE);
+  const dailyMoreLabel = tr('more.days.show', { count: dailyHiddenCount });
+
   const dailyRows = dailyDays
     .map((day, index) => {
       const target = `d${index}`;
@@ -291,7 +295,8 @@ export function renderHtml(report, options = {}) {
           </tr>`;
         })
         .join('');
-      return `<tr class="day" data-target="${target}" data-day-start="${day.dayStart}" data-unknown="${day.unknown === true}">
+      const extra = index >= DAILY_PAGE_SIZE;
+      return `<tr class="day${extra ? ' day-extra' : ''}" data-target="${target}" data-day-start="${day.dayStart}" data-unknown="${day.unknown === true}"${extra ? ' hidden' : ''}>
           <td class="nowrap"><span class="strong">${escapeHtml(label)}</span>${isToday ? ` <span class="pill pill-today">${tr('pill.today')}</span>` : ''}</td>
           <td class="num">${day.sessions.length}</td>
           <td class="num">${formatTokens(day.totals.totalTokens)}</td>
@@ -301,7 +306,7 @@ export function renderHtml(report, options = {}) {
             ${bar(sortCostMicro(day.totals), maxDayCost)}
           </td>
         </tr>
-        <tr class="detail" id="${target}" data-day-start="${day.dayStart}" hidden>
+        <tr class="detail${extra ? ' day-extra' : ''}" id="${target}" data-day-start="${day.dayStart}" hidden>
           <td colspan="5">
             <div class="detail-inner">
               <div class="detail-meta"><span>${tr('day.hint')}</span></div>
@@ -436,7 +441,7 @@ export function renderHtml(report, options = {}) {
   tr.detail { display: none; }
   tr.detail.open { display: table-row; }
   tr.detail > td { background: #fafbfc; padding: 0; border-top: none; }
-  tr.session-extra[hidden] { display: none !important; }
+  tr.session-extra[hidden], tr.day-extra[hidden] { display: none !important; }
   tr.session[hidden], tr.detail[hidden], tr.session[data-range-hidden] { display: none !important; }
   tr.day { cursor: pointer; }
   tr.day:hover { background: #fafbfc; }
@@ -512,7 +517,7 @@ export function renderHtml(report, options = {}) {
   /* No JavaScript: show every session row instead of the five-row page and
      hide the range selector / paging controls, which cannot work without JS. */
   .range-bar { display: none !important; }
-  tr.session.session-extra[hidden] { display: table-row !important; }
+  tr.session.session-extra[hidden], tr.day.day-extra[hidden] { display: table-row !important; }
   .sessions-more { display: none !important; }
   #daily[hidden] { display: block !important; }
 </style></noscript>
@@ -613,6 +618,11 @@ export function renderHtml(report, options = {}) {
         <tbody>${dailyRows}<tr id="daily-empty" class="empty-row"${dailyDays.length === 0 ? '' : ' hidden'}><td colspan="5" class="muted">${tr('empty.daily')}</td></tr></tbody>
       </table>
     </div>
+    ${
+      dailyHiddenCount > 0
+        ? `<div class="sessions-more" data-days-more><button type="button" class="more-btn" data-days-toggle data-more-label="${escapeHtml(dailyMoreLabel)}" aria-expanded="false">${escapeHtml(dailyMoreLabel)}</button></div>`
+        : ''
+    }
     <div class="note">${escapeHtml(tr('section.daily.hint'))}</div>
   </section>
 
@@ -657,6 +667,7 @@ ${timeRangeRuntimeSource()}
     var range = runtime.normalizeTimeRange(urlParam('range') || runtime.readSavedRange(storage));
     var view = runtime.normalizeView(urlParam('view') || runtime.readSavedView(storage));
     var expanded = false;
+    var daysExpanded = false;
     function urlParam(name) {
       try {
         return new URLSearchParams(window.location.search).get(name);
@@ -675,7 +686,13 @@ ${timeRangeRuntimeSource()}
       }
     }
     function applyView() {
-      runtime.applyTimeRange(document, { range: range, showAll: expanded, view: view, messages: i18n.messages });
+      runtime.applyTimeRange(document, {
+        range: range,
+        showAll: expanded,
+        showAllDays: daysExpanded,
+        view: view,
+        messages: i18n.messages,
+      });
     }
     runtime.bindRangeSelector(document, function (next) {
       range = next;
@@ -704,6 +721,16 @@ ${timeRangeRuntimeSource()}
           expanded = !expanded;
           applyView();
           section.classList.toggle('sessions-expanded', expanded);
+        });
+      }
+    }
+    var dailySection = document.getElementById('daily');
+    if (dailySection) {
+      var daysButton = dailySection.querySelector('[data-days-toggle]');
+      if (daysButton) {
+        daysButton.addEventListener('click', function () {
+          daysExpanded = !daysExpanded;
+          applyView();
         });
       }
     }

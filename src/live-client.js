@@ -50,6 +50,7 @@
     storageBlocked: false,
     lastHtml: null,
     showAll: false,
+    showAllDays: false,
     range: 'all',
     view: 'session',
     lastView: null,
@@ -219,6 +220,7 @@
     var result = runtime.applyTimeRange(document, {
       range: state.range,
       showAll: state.showAll,
+      showAllDays: state.showAllDays,
       view: state.view,
       messages: MESSAGES,
     });
@@ -229,6 +231,13 @@
   function setShowAll(showAll) {
     state.showAll = showAll === true;
     writeStore('showAll', state.showAll);
+    applyView();
+    writeStore('open', openSessionIds());
+  }
+
+  function setShowAllDays(showAllDays) {
+    state.showAllDays = showAllDays === true;
+    writeStore('showAllDays', state.showAllDays);
     applyView();
     writeStore('open', openSessionIds());
   }
@@ -582,6 +591,7 @@
   function bootHttp() {
     var open = readStore('open', []);
     state.showAll = readStore('showAll', false) === true;
+    state.showAllDays = readStore('showAllDays', false) === true;
     state.range = readRange();
     state.view = readView();
     restoreOpen(open);
@@ -598,6 +608,7 @@
     var previousCost = readStore('cost', null);
     var open = readStore('open', []);
     state.showAll = readStore('showAll', false) === true;
+    state.showAllDays = readStore('showAllDays', false) === true;
     state.range = readRange();
     state.view = readView();
     restoreOpen(open);
@@ -644,6 +655,12 @@
       if (toggle) {
         event.preventDefault();
         setShowAll(!state.showAll);
+        return;
+      }
+      var daysToggle = event.target.closest ? event.target.closest('[data-days-toggle]') : null;
+      if (daysToggle) {
+        event.preventDefault();
+        setShowAllDays(!state.showAllDays);
         return;
       }
       var row = event.target.closest ? event.target.closest('tr.session, tr.day') : null;

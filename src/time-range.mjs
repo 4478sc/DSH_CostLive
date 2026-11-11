@@ -30,6 +30,9 @@ export const VIEW_MODES = Object.freeze(['session', 'daily']);
 /** localStorage key for the selected view mode. */
 export const VIEW_STORAGE_KEY = 'dsh-cost-view';
 
+/** Daily rows shown before "show more": the most recent week. */
+export const DAILY_PAGE_SIZE = 7;
+
 /** Local midnight of the day containing `now` (the user's own time zone). */
 export function localMidnight(now) {
   const date = new Date(now);
@@ -502,7 +505,7 @@ function bindViewSelector(doc, onChange) {
  * only that day's share, so the cards answer "how much was spent in this
  * window" rather than "what did the sessions created in this window cost".
  */
-function applyDailyView(doc, range, now, days, messages) {
+function applyDailyView(doc, range, now, days, messages, showAllDays) {
   var sessionsSection = doc.getElementById('sessions');
   if (sessionsSection) sessionsSection.setAttribute('hidden', '');
   var dailySection = doc.getElementById('daily');
@@ -523,7 +526,18 @@ function applyDailyView(doc, range, now, days, messages) {
       continue;
     }
     kept += 1;
+    var extra = kept > DAILY_PAGE_SIZE;
+    row.classList.toggle('day-extra', extra);
+    if (detail) detail.classList.toggle('day-extra', extra);
     row.removeAttribute('data-range-hidden');
+    if (extra && !showAllDays) {
+      row.setAttribute('hidden', '');
+      if (detail) {
+        detail.setAttribute('hidden', '');
+        detail.classList.remove('open');
+      }
+      continue;
+    }
     row.removeAttribute('hidden');
     if (detail) detail.removeAttribute('hidden');
   }
@@ -548,6 +562,24 @@ function applyDailyView(doc, range, now, days, messages) {
   if (empty) {
     if (kept === 0) empty.removeAttribute('hidden');
     else empty.setAttribute('hidden', '');
+  }
+
+  // The daily table shows the most recent week first; older days sit behind
+  // the same "show more" affordance the session table uses.
+  var dayExtraCount = Math.max(0, kept - DAILY_PAGE_SIZE);
+  var dayMore = doc.querySelector('[data-days-more]');
+  if (dayMore) {
+    if (dayExtraCount === 0) dayMore.setAttribute('hidden', '');
+    else dayMore.removeAttribute('hidden');
+    var dayToggle = doc.querySelector('[data-days-toggle]');
+    if (dayToggle) {
+      var dayLabel = dayExtraCount > 0
+        ? uiText(messages, 'more.days.show', { count: dayExtraCount }) || '显示更多（还有 ' + dayExtraCount + ' 天）'
+        : uiText(messages, 'more.days.plain') || '显示更多';
+      dayToggle.setAttribute('data-more-label', dayLabel);
+      dayToggle.textContent = showAllDays && dayExtraCount > 0 ? (uiText(messages, 'more.days.less') || '收起') : dayLabel;
+      dayToggle.setAttribute('aria-expanded', showAllDays && dayExtraCount > 0 ? 'true' : 'false');
+    }
   }
 
   var note = doc.querySelector('[data-range-note]');
@@ -592,7 +624,8 @@ function applyTimeRange(doc, options) {
   var allSessions = data && Array.isArray(data.sessions) ? data.sessions : null;
   var dailyDays = data && Array.isArray(data.days) ? data.days : [];
   var pageSize = data && typeof data.pageSize === 'number' && data.pageSize > 0 ? data.pageSize : 5;
-  if (view === 'daily') return applyDailyView(doc, range, now, dailyDays, messages);
+  var showAllDays = options.showAllDays === true;
+  if (view === 'daily') return applyDailyView(doc, range, now, dailyDays, messages, showAllDays);
   var filtered = allSessions === null ? null : filterSessionsByRange(allSessions, range, now);
   var visible = Object.create(null);
   if (filtered !== null) {
@@ -780,6 +813,7 @@ export function timeRangeRuntimeSource() {
   return `(function () {
   'use strict';
   var DAY_MS = ${DAY_MS};
+  var DAILY_PAGE_SIZE = ${DAILY_PAGE_SIZE};
   var SORT_USD_TO_CNY = ${SORT_USD_TO_CNY};
   var STORAGE_KEY = ${JSON.stringify(TIME_RANGE_STORAGE_KEY)};
   var VIEW_KEY = ${JSON.stringify(VIEW_STORAGE_KEY)};

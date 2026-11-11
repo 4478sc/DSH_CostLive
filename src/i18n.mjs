@@ -78,6 +78,9 @@ export const MESSAGES = Object.freeze({
     'empty.daily': '无符合条件的花费',
 
     'more.show': '显示更多（还有 {count} 个）',
+    'more.days.show': '显示更多（还有 {count} 天）',
+    'more.days.plain': '显示更多',
+    'more.days.less': '收起',
     'more.show.plain': '显示更多',
     'more.less': '收起',
 
@@ -215,6 +218,9 @@ export const MESSAGES = Object.freeze({
     'empty.daily': 'No cost in range',
 
     'more.show': 'Show more ({count} left)',
+    'more.days.show': 'Show more ({count} more days)',
+    'more.days.plain': 'Show more',
+    'more.days.less': 'Show less',
     'more.show.plain': 'Show more',
     'more.less': 'Show less',
 

@@ -306,6 +306,41 @@ test('the daily runtime is self-contained and exposes storage helpers', () => {
   assert.doesNotMatch(timeRangeRuntimeSource(), /\bimport\b|export /u);
 });
 
+test('the daily table shows the latest seven days and expands on demand', () => {
+  const tokens = { uncachedInputTokens: 10, outputTokens: 1, cacheWriteTokens: 0, cacheReadTokens: 0 };
+  const days = Array.from({ length: 10 }, (_, index) => {
+    const dayStart = NOW - index * 86_400_000;
+    const day = {
+      day: 'd' + index,
+      dayStart,
+      unknown: false,
+      totals: { ...tokens, totalTokens: 11, costMicroCny: 1000, costMicroUsd: 0, cacheHit: 0.5, samples: 1 },
+      sessions: [
+        {
+          id: 's' + index,
+          title: 'day ' + index,
+          tokens: { ...tokens },
+          samples: 1,
+          costMicroCny: 1000,
+          costMicroUsd: 0,
+          models: [{ provider: 'p', model: 'm', priceKey: 'm', priced: true, tokens: { ...tokens }, costMicroCny: 1000, costMicroUsd: 0 }],
+        },
+      ],
+    };
+    return day;
+  });
+  const dom = makeDailyDom(days);
+  const runtime = runtimeForTests();
+
+  runtime.applyTimeRange(dom.doc, { range: 'all', view: 'daily', now: NOW });
+  assert.equal(dom.rows.filter((row) => row.hasAttribute('hidden')).length, 3, 'only the latest seven days are visible');
+  assert.equal(dom.rows[9].hasAttribute('hidden'), true);
+  assert.equal(dom.rows[6].hasAttribute('hidden'), false);
+
+  runtime.applyTimeRange(dom.doc, { range: 'all', view: 'daily', showAllDays: true, now: NOW });
+  assert.equal(dom.rows.filter((row) => row.hasAttribute('hidden')).length, 0, 'show more reveals every day');
+});
+
 function runtimeForTests() {
   const context = { window: {} };
   vm.createContext(context);

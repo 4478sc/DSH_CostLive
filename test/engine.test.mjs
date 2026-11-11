@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { analyzeEvents, usageFromEvent } from '../src/engine.mjs';
-import { normalizePricing } from '../src/pricing.mjs';
+import { normalizePricing, normalizeUsdPricing } from '../src/pricing.mjs';
+import { averageTokenPrice } from '../src/money.mjs';
 
 const PRICING = normalizePricing({
   models: { 'claude-sonnet-5-5': { input: 2.3, output: 11.5, cacheWrite: 2.875, cacheRead: 0.23 } },
@@ -64,6 +65,74 @@ test('official rows also carry the peak/off tier from the same windows', () => {
   assert.equal(result.byModel.length, 1);
   assert.equal(result.byModel[0].tier, 'peak');
   assert.equal(result.byModel[0].priced, false);
+});
+
+const USD_PRICING = normalizeUsdPricing({
+  providers: ['codex', 'openai', 'host-codex'],
+  models: { 'gpt-6.1-sol': { input: 2, output: 10, cacheWrite: 2.5, cacheRead: 0.1 } },
+});
+
+test('codex models are costed from the USD list price, not the CNY table', () => {
+  seq = 0;
+  const events = [
+    event('model/selection', { provider: 'codex', model: 'gpt-6.1-sol' }),
+    assistantMessage(usage(1_000_000, 1_000_000), 1, 1),
+  ];
+  const result = analyzeEvents(events, PRICING, USD_PRICING);
+  assert.equal(result.totals.costMicroCny, 0);
+  assert.equal(result.totals.costMicroUsd, 12_000_000);
+  const row = result.byModel[0];
+  assert.equal(row.priceKey, 'usd-gpt-6.1-sol');
+  assert.equal(row.priced, true);
+  assert.equal(row.costMicroUsd, 12_000_000);
+  assert.deepEqual(result.unpricedModels, []);
+});
+
+test('the USD table only prices the providers it lists', () => {
+  seq = 0;
+  const events = [
+    event('model/selection', { provider: 'aicodemirror1', model: 'gpt-6.1-sol' }),
+    assistantMessage(usage(1000, 100), 1, 1),
+  ];
+  const result = analyzeEvents(events, PRICING, USD_PRICING);
+  assert.equal(result.byModel[0].priced, false);
+  assert.equal(result.totals.costMicroUsd, 0);
+  assert.deepEqual(result.unpricedModels, ['gpt-6.1-sol']);
+});
+
+test('USD-priced rows join the USD token-price average', () => {
+  const average = averageTokenPrice([
+    {
+      model: 'gpt-6.1-sol',
+      priceKey: 'usd-gpt-6.1-sol',
+      priced: true,
+      costMicroCny: 0,
+      costMicroUsd: 4_000_000,
+      tokens: { uncachedInputTokens: 2_000_000, outputTokens: 0, cacheWriteTokens: 0, cacheReadTokens: 0 },
+    },
+  ]);
+  assert.equal(average.cnyTokens, 0);
+  assert.equal(average.usdTokens, 2_000_000);
+  assert.equal(average.usdMicroPerM, 2_000_000);
+});
+
+test('openai and host-codex rows fold into the codex provider', () => {
+  seq = 0;
+  const events = [
+    event('model/selection', { provider: 'codex', model: 'gpt-6.1-sol' }),
+    assistantMessage(usage(1000, 100), 1, 1),
+    event('model/selection', { provider: 'openai', model: 'gpt-6.1-sol' }),
+    assistantMessage(usage(2000, 200), 1, 2),
+    event('model/selection', { provider: 'host-codex', model: 'gpt-6.1-sol' }),
+    assistantMessage(usage(3000, 300), 1, 3),
+  ];
+  const result = analyzeEvents(events, PRICING, USD_PRICING);
+  assert.equal(result.byModel.length, 1, 'one row for all three routes');
+  assert.equal(result.byModel[0].provider, 'codex');
+  assert.equal(result.byModel[0].tokens.uncachedInputTokens, 6000);
+  assert.equal(result.byModel[0].tokens.outputTokens, 600);
+  // 6000 x \$2/M + 600 x \$10/M = \$0.018
+  assert.equal(result.byModel[0].costMicroUsd, 18000);
 });
 
 test('final sample replaces the streaming sample of the same step', () => {

@@ -208,9 +208,13 @@ export function buildDailyReport(results, pricing) {
       model.tokens.cacheWriteTokens += buckets.cacheWriteTokens;
       model.tokens.cacheReadTokens += buckets.cacheReadTokens;
 
-      const officialPrice = record.priceKey === 'opencode-official';
-      const resolved = !officialPrice && record.priced === true ? resolvePrice(record.model, pricing) : null;
-      if (officialPrice) {
+      // Official console rows and USD-list rows (codex) both carry micro-USD
+      // cache savings; only CNY-priced rows are re-derived from the CNY table.
+      const usdRow =
+        record.priceKey === 'opencode-official' ||
+        (typeof record.priceKey === 'string' && record.priceKey.startsWith('usd-'));
+      const resolved = !usdRow && record.priced === true ? resolvePrice(record.model, pricing) : null;
+      if (usdRow) {
         model.cacheSavingMicroUsd += record.cacheSavingMicroUsd ?? 0;
       } else if (resolved !== null) {
         // Same formula as modelCacheSavingMicro(), rounded per day+model so the

@@ -11,7 +11,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { sortSessionResults } from './activity.mjs';
 import { analyzeEvents } from './engine.mjs';
-import { loadPricing, priceTier, resolvePrice } from './pricing.mjs';
+import { loadPricing, loadUsdPricing, priceTier, resolvePrice } from './pricing.mjs';
 import { buildReport } from './report-data.mjs';
 import { buildReportDataset, escapeHtml, renderHtml } from './report-html.mjs';
 import { discoverSessions, readSession } from './sessions.mjs';
@@ -152,6 +152,9 @@ export function collectLiveReport(options = {}) {
   const pricing =
     options.pricingDocument ??
     loadPricing(options.pricingPath === undefined ? undefined : resolve(options.pricingPath));
+  const usdPricing =
+    options.usdPricingDocument ??
+    loadUsdPricing(options.usdPricingPath === undefined ? undefined : resolve(options.usdPricingPath));
   const since = parseDateBound(options.since, false);
   const until = parseDateBound(options.until, true);
   const results = [];
@@ -170,7 +173,7 @@ export function collectLiveReport(options = {}) {
         const { meta, events, projection } = readSession(descriptor);
         meta.source = source.label;
         meta.sourceHome = source.home;
-        results.push({ meta, analysis: analyzeEvents(events, pricing), projection });
+        results.push({ meta, analysis: analyzeEvents(events, pricing, usdPricing), projection });
         scanned += 1;
       } catch (error) {
         if (typeof options.onWarning === 'function') {

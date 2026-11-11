@@ -55,7 +55,10 @@ export function averageTokenPrice(models) {
       (tokens.cacheWriteTokens || 0) +
       (tokens.cacheReadTokens || 0);
     if (total <= 0) continue;
-    if (model.priceKey === 'opencode-official') {
+    const usdPriced =
+      model.priceKey === 'opencode-official' ||
+      (typeof model.priceKey === 'string' && model.priceKey.startsWith('usd-'));
+    if (usdPriced) {
       usdTokens += total;
       usdMicro += model.costMicroUsd || 0;
     } else if (model.priced === true) {

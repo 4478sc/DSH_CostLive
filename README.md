@@ -283,8 +283,24 @@ cost = (未缓存输入 × input + 输出 × output + 缓存写 × cacheWrite + 
 精确 id → 去 provider 前缀 → 去日期后缀 → 别名 → `*` 最长前缀通配。加模型只需在 `models`
 里加条目，无需改代码。
 
----
+### 美元价表（codex 等按美元计费的提供方）
 
+有些提供方按 OpenAI 官方 API 价目计费（美元），例如 `codex`。它们在
+[`config/usd-pricing.json`](config/usd-pricing.json) 里配置，单位 **USD / 1,000,000 tokens**：
+
+| 模型 | 输入（未缓存） | 输出 | 缓存写 | 缓存读 |
+|---|---:|---:|---:|---:|
+| `gpt-6.1-sol` | 2 | 10 | 2.5 | 0.1 |
+| `gpt-6-luna` | 0.1 | 0.5 | 0.125 | 0.01 |
+
+- `providers` 列出哪些提供方走这张表；命中的行只记美元（`costMicroCny` 保持 0），
+  `priceKey` 为 `usd-<模型>`，与 CNY 行一样参与「Token均价」的美元侧。
+- 同一服务的多条路由合并成一行：`codex` / `openai` / `host-codex` → `codex`，
+  `opencode` / `opencode-go` → `opencode`（`src/pricing.mjs` 的 `canonicalProvider`）。
+- 官方价目里的长上下文加价（>272k prompt tokens 的 2× 输入 / 1.5× 输出）未建模。
+- 自定义：`--usd my-usd-pricing.json`；文件不存在时视为「没有美元价表」，不会报错。
+
+---
 ## API
 
 服务模式提供三个只读接口：

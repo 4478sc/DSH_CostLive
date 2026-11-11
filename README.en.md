@@ -28,7 +28,7 @@ but the UI only shows token totals — no money, no cross-session roll-up. This 
 that gap:
 
 - **Zero dependencies** — only the Node.js standard library (`node:zlib` zstd, `node:http`); no `npm install`.
-- **Read-only** — it reads session logs and the projection cache; it never writes DSH data or changes config.
+- **Read-only** — it reads session logs and the projection cache; it never writes DSH data or configuration. Billing settings only write CostLive’s own local file.
 - **Local** — binds to `127.0.0.1` by default, the page has no auth, and nothing is sent to external services.
 - **Verifiable** — `--verify` reconciles every session against DSH's own `tokenUsage` projection; costs are
   recomputed from events, where a later sample replaces the streamed one and a retry counts as a second billed sample.
@@ -56,6 +56,26 @@ collect / price / render code as the report, so page numbers always match the CL
 | Report export | HTML / JSON / CSV, terminal tables, and per-turn / per-step detail for a single session |
 
 ---
+
+## Real price (subscription amortization)
+
+Open "Billing settings", enter monthly OpenCode and Codex subscriptions in USD with effective dates, and save. Then use the "Usage pricing / Real price" buttons above the editor to switch instantly without saving again. Mode changes never save unsubmitted price-history edits. Each provider needs at least one record; use 0 for no subscription, not a blank. The first record may start partway through a month; subsequent price changes must take effect on the first of a month. Mid-month upgrades, refunds and shifted renewal cycles are not modeled. Each rate continues until the next record; add a zero-price record at a month boundary to pause it.
+
+- Daily fixed cost = monthly fee / actual days in that month (28/29/30/31). Today counts in full; future days do not. Rounded cumulative micro-USD day shares reconcile exactly to a full month's fee.
+- Today / 7 days / 30 days / All time use **Asia/Shanghai** sample dates, not session creation dates. Days without tokens still incur subscription cost, reported as idle cost.
+- Host and VM usage is combined by provider before charging each subscription once. Subscription cost replaces OpenCode/Codex console/list prices rather than adding to them. Native log tokens do not depend on timely console archives.
+- Real-price daily costs initially show the latest 7 days. Each "Show more" adds 7 days; "Show less" returns to the first page. Live refresh preserves the expanded page count; pagination never changes totals.
+- Real mode reports provider totals, daily costs and effective price per million tokens, with **no model or session allocation**. The overall USD average includes idle cost and divides by four-bucket tokens in the configured USD scope; no tokens means "—". CNY/USD are never converted.
+- Usage before a subscription's effective date is marked incomplete, not backfilled at the current rate. Undated tokens are disclosed separately and excluded from daily costs/averages.
+- Settings live in the backend’s git-ignored config/billing.local.json. In a VM deployment, host localhost:4173 forwards over SSH to the VM: both entries share one backend and settings. The existing host SSH uploader transfers usage automatically. Deployments must preserve this file.
+- The mode is saved server-side; the web page, CLI and JSON/CSV use the same calculator. JSON referenceUsage contains reference prices only and does not contribute to real totals; top-level sessions is empty because session costs are not allocated.
+- An open settings editor is protected from polling fragment replacement; close it to resume. Static HTML supports viewing, not saving settings; edit through the live service or regenerate it.
+
+Both CLI entry points accept --billing <file> and --billing-mode usage|real. In real mode, --since/--until select Shanghai calendar dates (YYYY-MM-DD; ISO timestamps require a zone). Partial-scope model/workspace/top/priced-only filters are rejected to avoid dividing full subscription cost by partial usage. The page has no subscription import/export or current-view export buttons. CLI and GET /api/report or /api/report.csv still support report output.
+
+Settings writes require a **loopback connection**, same-origin JSON PUT /api/billing and X-CostLive-Settings: 1. LAN access is read-only: CSRF checks are not authentication. Use an SSH local port forward and localhost for remote administration; never expose the unauthenticated report service publicly. The endpoint only writes local CostLive settings, never DSH logs or credentials.
+
+See [billing.example.json](config/billing.example.json) for example prices. For a VM frontend, copy config/vm-dashboard.example.json to ignored config/vm-dashboard.local.json and set the SSH target, key path and existing host push-loop script. The dsh-cost-live.cmd launcher starts a reconnecting SSH forward and uploader instead of a second accounting backend; the existing ensure-host-sync watchdog uses the same mode. Port 4173 conflicts are reported without killing unrelated processes. Example prices are not your actual fees.
 
 ## Quick start
 

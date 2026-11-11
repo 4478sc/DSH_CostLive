@@ -55,7 +55,7 @@ function createHome() {
 test('collectLiveReport mirrors CLI filters, pricing, and empty-session handling', () => {
   const home = createHome();
   try {
-    const report = collectLiveReport({ home });
+    const report = collectLiveReport({ billingDocument: { mode: 'usage' }, home });
     assert.equal(report.summary.sessions, 2);
     // session-live-0002 runs DeepSeek V4.1 Flash through opencode-go: that route
     // is billed by the OpenCode console, so without an archived console row it
@@ -71,17 +71,17 @@ test('collectLiveReport mirrors CLI filters, pricing, and empty-session handling
       ['session-live-0001', 'session-live-0002'],
     );
 
-    const sonnetOnly = collectLiveReport({ home, model: 'sonnet' });
+    const sonnetOnly = collectLiveReport({ billingDocument: { mode: 'usage' }, home, model: 'sonnet' });
     assert.equal(sonnetOnly.summary.sessions, 1);
     assert.equal(sonnetOnly.sessions[0].title, '实时测试会话');
 
-    const pricedOnly = collectLiveReport({ home, pricedOnly: true });
+    const pricedOnly = collectLiveReport({ billingDocument: { mode: 'usage' }, home, pricedOnly: true });
     assert.equal(pricedOnly.summary.sessions, 1);
 
-    const all = collectLiveReport({ home, includeEmpty: true });
+    const all = collectLiveReport({ billingDocument: { mode: 'usage' }, home, includeEmpty: true });
     assert.equal(all.summary.sessions, 3);
 
-    const topOne = collectLiveReport({ home, top: 1 });
+    const topOne = collectLiveReport({ billingDocument: { mode: 'usage' }, home, top: 1 });
     assert.equal(topOne.sessions.length, 1);
   } finally {
     rmSync(home, { recursive: true, force: true });
@@ -91,7 +91,7 @@ test('collectLiveReport mirrors CLI filters, pricing, and empty-session handling
 test('splitReportHtml keeps the original report styles and wrap markup', () => {
   const home = createHome();
   try {
-    const report = collectLiveReport({ home });
+    const report = collectLiveReport({ billingDocument: { mode: 'usage' }, home });
     const { styles, body } = splitReportHtml(renderHtml(report));
     assert.match(styles, /--accent: #0f766e/u);
     assert.ok(body.startsWith('<div class="wrap">'));
@@ -107,7 +107,7 @@ test('splitReportHtml keeps the original report styles and wrap markup', () => {
 test('renderLiveDocument embeds mode/interval config and the live client', () => {
   const home = createHome();
   try {
-    const report = collectLiveReport({ home });
+    const report = collectLiveReport({ billingDocument: { mode: 'usage' }, home });
     const filePage = renderLiveDocument({
       report,
       mode: 'file',
@@ -136,7 +136,7 @@ test('renderLiveDocument embeds mode/interval config and the live client', () =>
 test('renderLiveFragment returns markup that can replace the wrap', () => {
   const home = createHome();
   try {
-    const report = collectLiveReport({ home });
+    const report = collectLiveReport({ billingDocument: { mode: 'usage' }, home });
     const fragment = renderLiveFragment(report);
     assert.equal(fragment.generatedAt, report.generatedAt);
     assert.equal(fragment.summary.sessions, 2);
@@ -155,7 +155,7 @@ test('writeLiveSnapshot writes atomically and leaves no temp file', () => {
   const home = createHome();
   const outDir = mkdtempSync(join(tmpdir(), 'dsh-cost-live-out-'));
   try {
-    const report = collectLiveReport({ home });
+    const report = collectLiveReport({ billingDocument: { mode: 'usage' }, home });
     const outPath = join(outDir, 'dsh-cost-live.html');
     const written = writeLiveSnapshot({ outPath, report, mode: 'file', intervalMs: 20_000, autoReload: true });
     assert.equal(written, outPath);
@@ -179,7 +179,7 @@ test('live server serves the page, fragment, report, and health endpoints', asyn
       host: '127.0.0.1',
       port: 0,
       intervalMs: 20_000,
-      reportOptions: { home },
+      reportOptions: { home, billingDocument: { mode: 'usage' } },
       open: false,
       logger,
     });

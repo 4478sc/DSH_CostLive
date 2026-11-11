@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "mode": "real",
+  "timeZone": "Asia/Shanghai",
+  "subscriptions": {
+    "opencode": [
+      {
+        "effectiveFrom": "2026-11-01",
+        "monthlyUsd": 20
+      },
+      {
+        "effectiveFrom": "2026-12-01",
+        "monthlyUsd": 30
+      }
+    ],
+    "codex": [
+      {
+        "effectiveFrom": "2026-11-01",
+        "monthlyUsd": 100
+      },
+      {
+        "effectiveFrom": "2026-12-01",
+        "monthlyUsd": 200
+      }
+    ]
+  }
+}

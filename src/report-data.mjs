@@ -3,6 +3,7 @@ import { isSubagentSession, projectionIsRunning, sortSessionRecords } from './ac
 import { canonicalProvider, resolvePrice } from './pricing.mjs';
 import { averageTokenPrice, sortCostMicro } from './money.mjs';
 import { formatDay, localMidnight } from './time-range.mjs';
+import { attachBilling, realPricingCsv } from './billing-report.mjs';
 
 /** Round a float for stable JSON output. */
 function round(value, digits = 6) {
@@ -386,7 +387,7 @@ export function buildTimeRangeDataset({ sessions, pricing, pageSize = 5, daily }
 }
 
 /** Build the complete report object emitted by `--format json`. */
-export function buildReport({ home, sources = [], pricing, results, generatedAt }) {
+export function buildReport({ home, sources = [], pricing, results, generatedAt, billing, billingBounds }) {
   const sessions = results.map(sessionRecord);
   // Running main -> running subagent -> completed (cost/time order within each
   // bucket). buildReport is shared by the CLI, JSON/CSV output, and the live
@@ -426,7 +427,7 @@ export function buildReport({ home, sources = [], pricing, results, generatedAt 
     cnyTokens: tokenPrice.cnyTokens,
     usdTokens: tokenPrice.usdTokens,
   };
-  return {
+  const report = {
     tool: 'dsh-cost',
     version: 1,
     generatedAt,
@@ -457,6 +458,7 @@ export function buildReport({ home, sources = [], pricing, results, generatedAt 
       error: source.error ?? null,
     })),
   };
+  return billing ? attachBilling(report, results, billing, billingBounds) : report;
 }
 
 /** Escape one CSV field (RFC 4180). */
@@ -467,6 +469,7 @@ function csvField(value) {
 
 /** One row per session+model, plus a TOTAL row. */
 export function toCsv(report) {
+  if (report.realPricing) return realPricingCsv(report);
   const header = [
     'session_id',
     'title',

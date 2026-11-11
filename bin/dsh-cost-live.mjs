@@ -48,6 +48,8 @@ const HELP = `dsh-cost-live — DSH 会话费用实时面板（CNY）
   --source <label=dir>  追加一个数据源；可重复（例如 主机 / VM）
   --sources <file>      从 JSON 读取多个数据源（label + home）
   --pricing <file>      自定义价格表 JSON（默认 config/pricing.json）
+  --billing <file>      本地订阅设置（默认 config/billing.local.json）
+  --billing-mode <mode> usage | real（覆盖已保存的默认方式）
   --official <file>     官方用量归档配置（默认 config/official.json）
   --no-official         忽略官方用量，全部用本地日志计算
   --model <text>        仅包含使用该模型（子串匹配）的会话
@@ -81,6 +83,8 @@ const VALUE_FLAGS = new Set([
   'sources',
   'pricing',
   'official',
+  'billing',
+  'billing-mode',
   'model',
   'workspace',
   'since',
@@ -168,6 +172,8 @@ function reportOptionsFrom(options) {
   if (options.sources !== undefined) reportOptions.sourcesPath = options.sources;
   if (options.pricing !== undefined) reportOptions.pricingPath = options.pricing;
   if (options.official !== undefined) reportOptions.official = options.official;
+  if (options.billing !== undefined) reportOptions.billingPath = options.billing;
+  if (options['billing-mode'] !== undefined) reportOptions.billingMode = options['billing-mode'];
   if (options['no-official'] === true) reportOptions.official = false;
   if (options.model !== undefined) reportOptions.model = options.model;
   if (options.workspace !== undefined) reportOptions.workspace = options.workspace;

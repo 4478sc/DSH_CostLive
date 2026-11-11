@@ -20,6 +20,9 @@ import { applyOfficialOverlay, loadOfficialReport, loadOfficialState, officialWi
 import { loadSources } from './sources.mjs';
 import { timeRangeRuntimeSource } from './time-range.mjs';
 import { DEFAULT_LOCALE, MESSAGES, normalizeLocale, t } from './i18n.mjs';
+import { loadBilling } from './billing-config.mjs';
+import { normalizeBilling, shanghaiDay } from './billing.mjs';
+import { billingClientSource } from './billing-ui.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -145,6 +148,8 @@ function filterResults(results, options) {
  * @returns {object} the same document emitted by `dsh-cost report --format json`.
  */
 export function collectLiveReport(options = {}) {
+  const billing = normalizeBilling({ ...(options.billingDocument ?? loadBilling(options.billingPath)), ...(options.billingMode ? { mode: options.billingMode } : {}) });
+  if (billing.mode === 'real' && (options.model || options.workspace || options.top || options.pricedOnly)) throw new Error('Real pricing requires the complete subscription scope; model/workspace/top/priced-only filters are unsupported');
   const sources = loadSources({
     sources: options.sources,
     sourcesPath: options.sourcesPath,
@@ -156,8 +161,18 @@ export function collectLiveReport(options = {}) {
   const usdPricing =
     options.usdPricingDocument ??
     loadUsdPricing(options.usdPricingPath === undefined ? undefined : resolve(options.usdPricingPath));
-  const since = parseDateBound(options.since, false);
-  const until = parseDateBound(options.until, true);
+  const billingDate = (value) => {
+    if (value === undefined) return undefined;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+      if (!Number.isFinite(Date.parse(value + 'T00:00:00Z')) || new Date(value + 'T00:00:00Z').toISOString().slice(0, 10) !== value) throw new Error('Invalid billing date');
+      return value;
+    }
+    if (!/(Z|[+-]\d{2}:\d{2})$/.test(value)) throw new Error('Real pricing ISO dates require an explicit time zone');
+    const day = shanghaiDay(Date.parse(value)); if (!day) throw new Error('Invalid billing date'); return day;
+  };
+  const billingBounds = billing.mode === 'real' ? { since: billingDate(options.since), until: billingDate(options.until) } : {};
+  const since = billing.mode === 'real' ? undefined : parseDateBound(options.since, false);
+  const until = billing.mode === 'real' ? undefined : parseDateBound(options.until, true);
   const results = [];
   const sourceStats = [];
   for (const source of sources) {
@@ -168,7 +183,7 @@ export function collectLiveReport(options = {}) {
       continue;
     }
     let scanned = 0;
-    const descriptors = discoverSessions({ home: source.home, workspace: options.workspace, since, until });
+    const descriptors = discoverSessions({ home: source.home, workspace: options.workspace, since: billing.mode === 'real' ? undefined : since, until: billing.mode === 'real' ? undefined : until });
     for (const descriptor of descriptors) {
       try {
         const { meta, events, projection } = readSession(descriptor);
@@ -192,9 +207,9 @@ export function collectLiveReport(options = {}) {
   try {
     const officialReport = loadOfficialReport({
       officialPath: options.officialPath ?? options.official,
-      enabled: options.official !== false && options.noOfficial !== true,
+      enabled: billing.mode !== 'real' && options.official !== false && options.noOfficial !== true,
     });
-    if (officialReport !== null) {
+    if (officialReport !== null && billing.mode !== 'real') {
       const tierOf = (model, at) => {
         const resolved = resolvePrice(model, pricing);
         return resolved === null ? null : priceTier(resolved.price, at);
@@ -226,6 +241,8 @@ export function collectLiveReport(options = {}) {
     pricing,
     results: filtered,
     generatedAt: Date.now(),
+    billing,
+    billingBounds,
   });
   if (official !== null) report.official = official;
   return report;
@@ -256,6 +273,8 @@ export function summarizeReport(report) {
     home: report.home,
     sources: report.sources ?? [],
     currency: report.currency,
+    billingMode: report.billing?.config.mode ?? 'usage',
+    timeZone: report.realPricing?.timeZone ?? null,
     unitTokens: report.unitTokens,
     sessions: report.summary.sessions,
     pricedSessions: report.summary.pricedSessions,
@@ -350,6 +369,7 @@ ${bodyWithId}
 <script>window.__DSH_LIVE__ = ${scriptJson({ ...config, locale, messages: MESSAGES[locale] })};</script>
 <script>
 ${timeRangeRuntimeSource()}
+${billingClientSource()}
 </script>
 <script>
 ${CLIENT_SOURCE}

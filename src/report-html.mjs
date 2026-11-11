@@ -6,6 +6,7 @@ import { formatPercent, formatTime } from './format.mjs';
 import { buildTimeRangeDataset, modelCacheSavingMicro } from './report-data.mjs';
 import { DAILY_PAGE_SIZE, formatDay, formatRangeLabel, timeRangeRuntimeSource } from './time-range.mjs';
 import { MESSAGES, normalizeLocale, sourceLabel, t } from './i18n.mjs';
+import { billingSettings, billingClientSource, BILLING_CSS, realBody } from './billing-ui.mjs';
 
 const ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
 
@@ -105,7 +106,8 @@ export function buildReportDataset(report) {
     models: report.pricing?.models ?? {},
     aliases: report.pricing?.aliases ?? {},
   };
-  return buildTimeRangeDataset({ sessions: report.sessions, daily: report.daily, pricing, pageSize: SESSION_PAGE_SIZE });
+  const reference = report.referenceUsage ?? report;
+  return { ...buildTimeRangeDataset({ sessions: reference.sessions, daily: reference.daily, pricing, pageSize: SESSION_PAGE_SIZE }), billing: report.billing ?? null };
 }
 
 /** Render a bar whose width is relative to `max`. */
@@ -118,15 +120,17 @@ function bar(value, max, className = '') {
 export function renderHtml(report, options = {}) {
   const locale = normalizeLocale(options.locale);
   const tr = (key, params) => t(locale, key, params);
-  const { summary, pricing } = report;
+  const real = report.realPricing;
+  const renderReport = real ? { ...report, summary: report.referenceUsage.summary, sessions: report.referenceUsage.sessions, daily: report.referenceUsage.daily } : report;
+  const { summary, pricing } = renderReport;
   // Render from a sorted copy: running main -> running subagent -> completed,
   // with the existing cost/time order preserved inside each bucket. Running
   // sessions therefore always land inside the first SESSION_PAGE_SIZE rows.
-  const sessions = sortSessionRecords([...report.sessions]);
+  const sessions = sortSessionRecords([...renderReport.sessions]);
   const hiddenCount = Math.max(0, sessions.length - SESSION_PAGE_SIZE);
   const runningCount = sessions.filter((session) => session.running === true).length;
   const maxCost = Math.max(0, ...sessions.map((session) => sortCostMicro(session.totals)));
-  const dailyDays = Array.isArray(report.daily?.days) ? report.daily.days : [];
+  const dailyDays = Array.isArray(renderReport.daily?.days) ? renderReport.daily.days : [];
   const maxDayCost = Math.max(0, ...dailyDays.map((day) => sortCostMicro(day.totals)));
   const todayKey = formatDay(report.generatedAt);
   const sources = Array.isArray(report.sources) ? report.sources : [];
@@ -146,7 +150,8 @@ export function renderHtml(report, options = {}) {
   const models = aggregateModels(sessions, pricing);
   const billable = summary.inputTokens + summary.cacheWriteTokens + summary.cacheReadTokens;
   // Average price of priced tokens only; CNY and USD stay separate columns.
-  const tokenPrice = averageTokenPrice(models);
+  const tokenPrice = real ? real.summary.tokenPrice : averageTokenPrice(models);
+  const displaySummary = real ? real.summary : summary;
   const pricedTokenCount = tokenPrice.cnyTokens + tokenPrice.usdTokens;
   const pricedCount = summary.pricedSessions;
   const unpriced = summary.unpricedModels;
@@ -518,6 +523,7 @@ export function renderHtml(report, options = {}) {
   @media (prefers-reduced-motion: reduce) {
     .pill-run i { animation: none; }
   }
+${BILLING_CSS}
 </style>
 <noscript><style>
   /* No JavaScript: show every session row instead of the five-row page and
@@ -537,7 +543,7 @@ export function renderHtml(report, options = {}) {
       <div class="sub">${tr('app.generated', { time: escapeHtml(formatTime(report.generatedAt)), source: `<code>${escapeHtml(sourceText)}</code>` })}</div>
     </div>
     <div class="hero-side">
-      <div class="badge">${escapeHtml(tr('app.badge', { currency: report.currency, tokens: formatTokens(report.unitTokens) }))}</div>
+      <div class="badge">${escapeHtml(real ? tr('billing.real') + ' · USD · Asia/Shanghai' : tr('app.badge', { currency: report.currency, tokens: formatTokens(report.unitTokens) }))}</div>
       <a class="lang-link" data-lang-link href="?lang=${locale === 'en' ? 'zh' : 'en'}" title="${escapeHtml(tr('lang.switchLabel'))}">${escapeHtml(tr('lang.switch'))}</a>
     </div>
   </div>
@@ -557,34 +563,36 @@ export function renderHtml(report, options = {}) {
     <span class="range-note" data-range-note aria-live="polite">${escapeHtml(rangeNote)}</span>
   </div>
 
+  ${billingSettings(report.billing?.config, locale)}
   <div class="cards">
     <div class="card money">
       <div class="k">${escapeHtml(tr('card.cost'))}</div>
-      <div class="v" id="stat-cost">${money(summary.costMicroCny, summary.costMicroUsd)}</div>
-      <div class="f" id="stat-cost-note">${escapeHtml(tr('card.cost.note', { priced: pricedCount, total: summary.sessions }))}</div>
+      <div class="v" id="stat-cost">${money(displaySummary.costMicroCny, displaySummary.costMicroUsd)}</div>
+      <div class="f" id="stat-cost-note">${escapeHtml(real ? tr('billing.range', { days: real.summary.days, until: real.until, idle: formatUsd(real.summary.idleMicroUsd / 1e6) }) : tr('card.cost.note', { priced: pricedCount, total: summary.sessions }))}</div>
     </div>
     <div class="card">
       <div class="k">${escapeHtml(tr('card.tokens'))}</div>
-      <div class="v" id="stat-tokens">${formatTokens(summary.totalTokens)}</div>
-      <div class="f" id="stat-tokens-note">in ${formatTokens(summary.inputTokens)} · out ${formatTokens(summary.outputTokens)}</div>
+      <div class="v" id="stat-tokens">${formatTokens(displaySummary.totalTokens)}</div>
+      <div class="f" id="stat-tokens-note">in ${formatTokens(displaySummary.inputTokens)} · out ${formatTokens(displaySummary.outputTokens)}</div>
     </div>
     <div class="card">
       <div class="k">${escapeHtml(tr('card.cacheRead'))}</div>
-      <div class="v" id="stat-cache-read">${formatTokens(summary.cacheReadTokens)}</div>
-      <div class="f" id="stat-cache-read-note">${escapeHtml(tr('card.cacheRead.note', { percent: formatPercent(summary.cacheHit) }))}</div>
+      <div class="v" id="stat-cache-read">${formatTokens(displaySummary.cacheReadTokens)}</div>
+      <div class="f" id="stat-cache-read-note">${escapeHtml(tr('card.cacheRead.note', { percent: formatPercent(displaySummary.cacheHit) }))}</div>
     </div>
     <div class="card">
       <div class="k">${escapeHtml(tr('card.tokenPrice'))}</div>
-      <div class="v" id="stat-token-price">${money(tokenPrice.cnyMicroPerM, tokenPrice.usdMicroPerM)}</div>
-      <div class="f" id="stat-token-price-note">${escapeHtml(tr('card.tokenPrice.note', { tokens: formatTokens(pricedTokenCount) }))}</div>
+      <div class="v" id="stat-token-price">${real && tokenPrice.cnyMicroPerM === null && tokenPrice.usdMicroPerM === null ? '—' : money(tokenPrice.cnyMicroPerM, tokenPrice.usdMicroPerM)}</div>
+      <div class="f" id="stat-token-price-note">${escapeHtml(real ? tr('billing.real') + ' · / 1M tokens' : tr('card.tokenPrice.note', { tokens: formatTokens(pricedTokenCount) }))}</div>
     </div>
   </div>
 
   ${sourceErrorNote}
   ${unpricedNote}
-  ${officialNote}${pendingNote}
-  ${consoleNote}
+  ${real ? '' : officialNote + pendingNote}
+  ${real ? '' : consoleNote}
 
+  <div id="usage-pricing-content"${real ? ' hidden' : ''}>
   <section>
     <h2>${escapeHtml(tr('section.models'))}</h2>
     <div class="table-wrap">
@@ -644,15 +652,18 @@ export function renderHtml(report, options = {}) {
     <div class="note">${tr('section.price.note')}</div>
   </section>
 
+  </div>
+  <div id="real-pricing-content">${real ? realBody(real, locale) : ''}</div>
   <footer>
     ${tr('footer.generated')}<br>
-    ${escapeHtml(tr('footer.disclaimer'))}
+    ${escapeHtml(tr(real ? 'billing.note' : 'footer.disclaimer'))}
   </footer>
   <script type="application/json" id="dsh-cost-data">${datasetJson}</script>
   <script type="application/json" id="dsh-cost-i18n">${JSON.stringify({ locale, messages: MESSAGES[locale] }).replace(/</gu, '\\u003c')}</script>
 </div>
 <script>
 ${timeRangeRuntimeSource()}
+${billingClientSource()}
   (function () {
     var runtime = window.DSH_TIME_RANGE;
     if (!runtime) return;
@@ -759,6 +770,16 @@ ${timeRangeRuntimeSource()}
         applyView();
       });
     }
+    // Real-price rows are rebuilt on every range update; use delegation.
+    document.addEventListener('click', function (event) {
+      var more = event.target.closest('[data-days-toggle]');
+      var collapse = event.target.closest('[data-days-collapse]');
+      var control = more || collapse;
+      if (!control || !control.closest('#real-pricing-content')) return;
+      if (collapse || (lastResult && lastResult.allShown)) dailyPages = 1;
+      else dailyPages += 1;
+      applyView();
+    });
     applyView();
   })();
 </script>

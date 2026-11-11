@@ -61,7 +61,7 @@ test('collectLiveReport merges multiple homes and tracks per-source counts', () 
   const host = createHome('host', ['session-host-1', 'session-host-2']);
   const vm = createHome('vm', ['session-vm-1']);
   try {
-    const report = collectLiveReport({
+    const report = collectLiveReport({ billingDocument: { mode: 'usage' },
       sources: [`host=${host}`, `vm=${vm}`],
       includeEmpty: true,
     });
@@ -89,7 +89,7 @@ test('a missing source is reported without hiding the remaining source', () => {
   const missing = join(tmpdir(), `dsh-cost-missing-${process.pid}-${Date.now()}`);
   try {
     const warnings = [];
-    const report = collectLiveReport({
+    const report = collectLiveReport({ billingDocument: { mode: 'usage' },
       sources: [`host=${host}`, `vm=${missing}`],
       includeEmpty: true,
       onWarning: (message) => warnings.push(message),

@@ -55,22 +55,22 @@ DSH 会把每个会话的完整事件流写进 `~/.dsh/sessions/` 下的 zstd �
 
 ## 真实价格（订阅摊销）
 
-在实时页打开「计费设置」，选择「真实价格」，分别填写 OpenCode 和 Codex 的月订阅费用（USD）与生效日期，再保存。每个提供方至少一条记录；没有订阅请填 0，空白不代表免费。首条记录可从月中某日起算；后续价格记录必须从某月 1 日生效，不处理月中升级、退款或续费周期偏移。上一条价格持续生效，直到下一条记录；暂停可在月初添加 0 美元记录。
+在实时页打开「计费设置」，填写 OpenCode 和 Codex 的月订阅费用（USD）与生效日期并保存。之后可使用设置上方的「当前计费方式 / 真实价格」按钮一键切换，无需再次保存，切换不会保存尚未提交的月费编辑。每个提供方至少一条记录；没有订阅请填 0，空白不代表免费。首条记录可从月中某日起算；后续价格记录必须从某月 1 日生效，不处理月中升级、退款或续费周期偏移。上一条价格持续生效，直到下一条记录；暂停可在月初添加 0 美元记录。
 
 - 日固定费用 = 月费 / 当月实际天数（28/29/30/31）；今天计完整一天，未来日期不计。微美元舍入按累计日份额求差，完整月份精确等于月费。
 - 统一按 **Asia/Shanghai** 采样日期统计 Today / 7 天 / 30 天 / All time；不沿用会话创建日期。即使某天无 token，也收取订阅日额并显示闲置费用。
 - 宿主机与 VM 数据先按提供方合并，每份订阅只计一次。OpenCode/Codex 的原官网/价表费用被替换，而非叠加；使用原生日志 token，不依赖官网归档及时到达。
 - 真实模式只显示提供方总费用、按天费用和每百万 token 均价，**不向模型或会话分摊**。整体 USD 均价含闲置订阅费，分母是对应已配置 USD 范围的四桶 token；无 token 显示「—」。CNY/USD 不折算。
 - 生效日期以前的用量会标为费用不完整，不按当前价格回填；无有效采样日期的 token 单独提示且不进入按日费用/均价。
-- 配置保存在 git 忽略的 config/billing.local.json（本地个人设置）中；可在网页导出/导入，两台服务需使用相同配置，**不会自动同步**。部署时不得覆盖该文件。
+- 配置保存在后端 git 忽略的 config/billing.local.json 中。VM部署使用同一个后端：宿主机 localhost:4173 经SSH转发到VM，虚拟机入口与它共用设置；宿主机用量由既有SSH推送循环自动上传，无需手工搬运配置。部署时不得覆盖该文件。
 - 模式保存在服务端，网页、CLI、JSON/CSV 使用同一计算函数。原参考金额位于 JSON 的 referenceUsage 中，不计入真实总费用；真实模式顶层 sessions 为空，明确不提供会话费用。
-- 打开设置编辑器时后台片段不会覆盖未保存的表单；关闭后恢复。静态 HTML 仅查看/导出，不能保存配置，需要在实时服务修改或重新生成。
+- 打开设置编辑器时后台片段不会覆盖未保存的表单；关闭后恢复。静态 HTML 仅查看，不能保存配置，需要在实时服务修改或重新生成。
 
-CLI 两个入口都支持 --billing <file> 和 --billing-mode usage|real；真实模式的 --since/--until 是上海自然日（YYYY-MM-DD，ISO 时间必须带时区），不支持 model/workspace/top/priced-only 等局部范围过滤，避免将全额订阅除以部分用量。网页的导出按钮导出当前筛选结果；GET /api/report 与 /api/report.csv 导出服务端完整范围。
+CLI 两个入口都支持 --billing <file> 和 --billing-mode usage|real；真实模式的 --since/--until 是上海自然日（YYYY-MM-DD，ISO 时间必须带时区），不支持 model/workspace/top/priced-only 等局部范围过滤，避免将全额订阅除以部分用量。网页不提供订阅设置导入/导出或当前视图导出按钮；CLI 与 GET /api/report、/api/report.csv 仍支持报表输出。
 
 设置写入仅接受**回环连接**上的同源 JSON PUT /api/billing，并要求 X-CostLive-Settings: 1；局域网只读，不把 CSRF 检查误当作认证。远程管理请使用 SSH 本地端口转发后访问 localhost；不要把未鉴权的报告服务暴露到公网。该接口只改 CostLive 本地设置，不写 DSH 日志/凭据。
 
-示例配置与命令见 [billing.example.json](config/billing.example.json)。示例金额不代表你的真实订阅费。
+示例配置见 [billing.example.json](config/billing.example.json)。VM前端模式：复制 config/vm-dashboard.example.json 为被忽略的 config/vm-dashboard.local.json，填写SSH目标、密钥路径与既有宿主机push-loop脚本路径。双击 dsh-cost-live.cmd 会启动可重连的SSH转发及上传循环，不启动第二个计费后端；已有 ensure-host-sync 看门狗也复用此模式。若4173端口被其他服务占用会报冲突，不会擅自终止进程。示例金额不代表你的真实订阅费。
 
 ## 快速开始
 

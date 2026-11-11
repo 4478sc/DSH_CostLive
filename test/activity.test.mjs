@@ -164,7 +164,7 @@ test('activity rank and record comparator put running main before subagent befor
 test('live report sorts running sessions first and keeps activity fields in JSON records', () => {
   const home = createHome();
   try {
-    const report = collectLiveReport({ home });
+    const report = collectLiveReport({ billingDocument: { mode: 'usage' }, home });
     assert.deepEqual(
       report.sessions.map((session) => session.id),
       EXPECTED_IDS,
@@ -193,7 +193,7 @@ test('live report sorts running sessions first and keeps activity fields in JSON
 test('HTML renders running badges, hides sessions after the first five, and orders rows', () => {
   const home = createHome();
   try {
-    const report = collectLiveReport({ home });
+    const report = collectLiveReport({ billingDocument: { mode: 'usage' }, home });
     const html = renderHtml(report);
     assertTitleOrder(html);
 
@@ -225,7 +225,7 @@ test('HTML renders running badges, hides sessions after the first five, and orde
 test('live fragment/document keep the order, paging control, and state restoration', () => {
   const home = createHome();
   try {
-    const report = collectLiveReport({ home });
+    const report = collectLiveReport({ billingDocument: { mode: 'usage' }, home });
     const fragment = renderLiveFragment(report);
     assert.ok(fragment.html.startsWith('<div class="wrap">'));
     assertTitleOrder(fragment.html);
@@ -261,7 +261,7 @@ function runCli(args) {
     return true;
   };
   try {
-    const code = main(args);
+    const code = main([...args, '--billing', join(args[args.indexOf('--home') + 1], 'test-billing.json')]);
     return { code, stdout: stdout.join(''), stderr: stderr.join('') };
   } finally {
     process.stdout.write = originalOut;

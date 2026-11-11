@@ -1,0 +1,6 @@
+{
+  "host": "192.0.2.10",
+  "user": "ubuntu",
+  "keyPath": "%USERPROFILE%/.ssh/id_ed25519",
+  "pushLoop": "../dsh-cost/vm/push-loop.ps1"
+}

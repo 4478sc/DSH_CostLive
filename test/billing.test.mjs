@@ -91,7 +91,11 @@ test('local config saves atomically and real live/CSV/static reports use the sha
     const report=collectLiveReport({home:f.home,billingPath:f.billingPath,since:'2026-11-01',until:'2026-11-02',official:false});
     assert.equal(report.summary.costUsd,6);assert.equal(report.summary.totalTokens,600);assert.equal(report.sessions.length,0);assert.equal(report.referenceUsage.sessions.length,1);
     assert.match(toCsv(report),/billing_mode/);assert.match(toCsv(report),/TOTAL/);
-    assert.match(renderHtml(report,{locale:'en'}),/Costs by provider/);assert.match(renderLiveDocument({report,locale:'en'}),/billing-form/);
+    const html = renderHtml(report,{locale:'en'});
+    assert.match(html,/data-billing-mode="usage"/); assert.match(html,/data-billing-mode="real"/);
+    assert.doesNotMatch(html,/data-billing-export|data-billing-import|data-real-export/);
+    assert.match(html,/<th class="num">Token<\/th>/);
+    assert.match(html,/Costs by provider/);assert.match(renderLiveDocument({report,locale:'en'}),/billing-form/);
     assert.equal(renderLiveFragment(report).dataset.billing.config.mode,'real');
     const output = join(f.dir,'report.json');
     assert.equal(main(['report','--home',f.home,'--billing',f.billingPath,'--since','2026-11-01','--until','2026-11-02','--format','json','--out',output]),0);
@@ -111,6 +115,14 @@ test('billing API rejects cross-origin, missing header, invalid input and persis
     assert.equal(loadBilling(f.billingPath).mode,'real');
     const report=await (await fetch(live.url+'api/report')).json();assert.equal(report.billing.config.mode,'real');assert.equal(report.summary.totalTokens,600);
     const csv=await (await fetch(live.url+'api/report.csv')).text();assert.match(csv,/billing_mode/);
+    const mode = (value) => fetch(live.url+'api/billing/mode',{method:'PUT',headers:{'Content-Type':'application/json','Origin':live.url.slice(0,-1),'X-CostLive-Settings':'1'},body:JSON.stringify({mode:value,locale:'en',subscriptions:{codex:[]}})});
+    const before = loadBilling(f.billingPath).subscriptions;
+    const switched = await mode('usage'); assert.equal(switched.status,200);
+    const answer = await switched.json(); assert.equal(answer.fragment.dataset.billing.config.mode,'usage');
+    assert.deepEqual(loadBilling(f.billingPath).subscriptions,before);
+    assert.equal((await mode('invalid')).status,400);
+    assert.equal((await mode('real')).status,200);
+    assert.deepEqual(loadBilling(f.billingPath).subscriptions,before);
     assert.equal((await send({...config(),mode:'usage'})).status,200);
     assert.equal((await (await fetch(live.url+'api/report')).json()).billing.config.mode,'usage');
   }finally{await live.close();rmSync(f.dir,{recursive:true,force:true});}
@@ -122,5 +134,5 @@ test('real pricing DOM hook updates cards and providers for every range',()=>{
   for(const id of ['stat-cost','stat-cost-note','stat-tokens','stat-tokens-note','stat-cache-read','stat-cache-read-note','stat-token-price','stat-token-price-note','usage-pricing-content','real-pricing-content'])nodes.set(id,node());
   const doc={getElementById:id=>nodes.get(id),querySelector:()=>null,querySelectorAll:()=>[]};
   const context=vm.createContext({window:{}});vm.runInContext(timeRangeRuntimeSource(),context);
-  for(const range of ['all','30d','7d','today']){const result=context.window.DSH_TIME_RANGE.applyTimeRange(doc,{range,now:at('2026-11-12'),messages:MESSAGES.en});assert.equal(result.stats.costMicroUsd,subscriptionReport([],config(),{range,now:at('2026-11-12')}).summary.costMicroUsd);assert.match(nodes.get('real-pricing-content').innerHTML,/Costs by provider/);}
+  for(const range of ['all','30d','7d','today']){const result=context.window.DSH_TIME_RANGE.applyTimeRange(doc,{range,now:at('2026-11-12'),messages:MESSAGES.en});assert.equal(result.stats.costMicroUsd,subscriptionReport([],config(),{range,now:at('2026-11-12')}).summary.costMicroUsd);assert.match(nodes.get('real-pricing-content').innerHTML,/Costs by provider/);assert.doesNotMatch(nodes.get('real-pricing-content').innerHTML,/data-real-export/);assert.match(nodes.get('real-pricing-content').innerHTML,/<th class="num">Token<\/th>/);}
 });

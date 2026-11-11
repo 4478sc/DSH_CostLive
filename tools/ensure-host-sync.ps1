@@ -13,6 +13,12 @@ $ErrorActionPreference = 'Continue'
 if ([string]::IsNullOrWhiteSpace($Repo)) { $Repo = Split-Path -Parent $PSScriptRoot }
 $Repo = [IO.Path]::GetFullPath($Repo)
 
+# VM-backed deployment: keep the forward and host uploader alive; no local accounting.
+if (Test-Path (Join-Path $Repo 'config/vm-dashboard.local.json')) {
+  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'vm-dashboard.ps1') -Ensure
+  exit $LASTEXITCODE
+}
+
 $startSync = Join-Path $PSScriptRoot 'start-sync.ps1'
 $outDir = Join-Path $Repo 'out'
 $mirror = Join-Path (Split-Path -Parent $Repo) '.dsh-vm'

@@ -223,7 +223,7 @@ export async function startLiveServer(options = {}) {
 
   const server = createServer(async (request, response) => {
     const method = request.method ?? 'GET';
-    if (method === 'PUT' && request.url === '/api/billing') {
+    if (method === 'PUT' && ['/api/billing', '/api/billing/mode'].includes(request.url)) {
       // Custom JSON header + exact Origin stops CSRF and cross-origin writes.
       // Host checking also stops DNS rebinding against this local/trusted-LAN service.
       const peer = request.socket.remoteAddress;
@@ -242,12 +242,15 @@ export async function startLiveServer(options = {}) {
         if (Number(request.headers['content-length'] ?? 0) > 65536) { sendJson(response, 413, {error:'Settings body too large'}); request.resume(); return; }
         let text = ''; let size = 0;
         for await (const chunk of request) { size += chunk.length; if (size > 65536) { sendJson(response, 413, {error:'Settings body too large'}); request.destroy(); return; } text += chunk.toString('utf8'); }
-        const config = normalizeBilling(JSON.parse(text));
+        const input = JSON.parse(text);
+        const modeOnly = request.url === '/api/billing/mode';
+        if (modeOnly && !['usage', 'real'].includes(input?.mode)) throw new Error('Invalid billing mode');
+        const config = normalizeBilling(modeOnly ? { ...loadBilling(reportOptions.billingPath), mode: input.mode } : input);
         if (reportOptions.billingDocument || reportOptions.billingMode || reportOptions.model || reportOptions.workspace || reportOptions.top || reportOptions.pricedOnly) throw new Error('Settings are read-only when report overrides or scope filters are active');
         saveBilling(reportOptions.billingPath, config);
         cache = null;
-        refresh(true);
-        sendJson(response, 200, { ok: true, config });
+        const current = refresh(true);
+        sendJson(response, 200, { ok: true, config, ...(modeOnly ? { fragment: renderLiveFragment(current.report, { locale: normalizeLocale(input.locale) }) } : {}) });
       } catch (error) { sendJson(response, 400, { error: error.message }); }
       return;
     }

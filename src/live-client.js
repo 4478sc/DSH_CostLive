@@ -409,14 +409,14 @@
 
   /* --------------------------------------------------------------- refresh */
 
-  function applyFragment(payload) {
+  function applyFragment(payload, forceBilling) {
     var html = payload && payload.html;
     if (typeof html !== 'string' || html.indexOf('<div class="wrap"') === -1) {
       throw new Error('返回的数据格式不正确');
     }
     // Do not discard unsaved subscription edits during background polling.
     var editor = document.getElementById('billing-settings');
-    if (editor && editor.open) return false;
+    if (editor && editor.open && !forceBilling) return false;
     var scrollY = window.scrollY || window.pageYOffset || 0;
     var open = openSessionIds();
     var parsed = new DOMParser().parseFromString(html, 'text/html');
@@ -426,6 +426,10 @@
     imported.id = 'live-wrap';
     var current = document.getElementById('live-wrap');
     if (!current) throw new Error('页面结构已变化');
+    if (forceBilling && editor) {
+      var replacementEditor = imported.querySelector('#billing-settings');
+      if (replacementEditor) replacementEditor.replaceWith(editor);
+    }
     current.replaceWith(imported);
     // The cards are recomputed from the embedded dataset, so it has to travel
     // with every fragment; otherwise a long-open tab freezes its totals.
@@ -726,6 +730,16 @@
       if (MODE === 'file') rememberState();
     });
   }
+
+  window.addEventListener('dsh-billing-updated', function (event) {
+    ++state.requestId; // Ignore any older poll racing the mode update.
+    state.busy = false;
+    applyFragment(event.detail, true);
+    state.lastHtml = event.detail.html;
+    state.lastGeneratedAt = event.detail.generatedAt;
+    state.nextAt = Date.now() + INTERVAL;
+    render();
+  });
 
   function boot() {
     if (MODE === 'file' && AUTO_RELOAD && !storageWorks()) {

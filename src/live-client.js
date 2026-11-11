@@ -49,8 +49,8 @@
     requestId: 0,
     storageBlocked: false,
     lastHtml: null,
-    showAll: false,
-    showAllDays: false,
+    sessionPages: 1,
+    dailyPages: 1,
     range: 'all',
     view: 'session',
     lastView: null,
@@ -219,8 +219,8 @@
     if (!runtime) return null;
     var result = runtime.applyTimeRange(document, {
       range: state.range,
-      showAll: state.showAll,
-      showAllDays: state.showAllDays,
+      sessionPages: state.sessionPages,
+      dailyPages: state.dailyPages,
       view: state.view,
       messages: MESSAGES,
     });
@@ -228,16 +228,16 @@
     return result;
   }
 
-  function setShowAll(showAll) {
-    state.showAll = showAll === true;
-    writeStore('showAll', state.showAll);
+  function setSessionPages(pages) {
+    state.sessionPages = Math.max(1, Math.floor(Number(pages) || 1));
+    writeStore('sessionPages', state.sessionPages);
     applyView();
     writeStore('open', openSessionIds());
   }
 
-  function setShowAllDays(showAllDays) {
-    state.showAllDays = showAllDays === true;
-    writeStore('showAllDays', state.showAllDays);
+  function setDailyPages(pages) {
+    state.dailyPages = Math.max(1, Math.floor(Number(pages) || 1));
+    writeStore('dailyPages', state.dailyPages);
     applyView();
     writeStore('open', openSessionIds());
   }
@@ -590,8 +590,8 @@
 
   function bootHttp() {
     var open = readStore('open', []);
-    state.showAll = readStore('showAll', false) === true;
-    state.showAllDays = readStore('showAllDays', false) === true;
+    state.sessionPages = Math.max(1, Number(readStore('sessionPages', 1)) || 1);
+    state.dailyPages = Math.max(1, Number(readStore('dailyPages', 1)) || 1);
     state.range = readRange();
     state.view = readView();
     restoreOpen(open);
@@ -607,8 +607,8 @@
     var savedPaused = readStore('paused', false) === true;
     var previousCost = readStore('cost', null);
     var open = readStore('open', []);
-    state.showAll = readStore('showAll', false) === true;
-    state.showAllDays = readStore('showAllDays', false) === true;
+    state.sessionPages = Math.max(1, Number(readStore('sessionPages', 1)) || 1);
+    state.dailyPages = Math.max(1, Number(readStore('dailyPages', 1)) || 1);
     state.range = readRange();
     state.view = readView();
     restoreOpen(open);
@@ -654,13 +654,29 @@
       var toggle = event.target.closest ? event.target.closest('[data-sessions-toggle]') : null;
       if (toggle) {
         event.preventDefault();
-        setShowAll(!state.showAll);
+        var sessionView = state.lastView && state.lastView.view === 'session' ? state.lastView : null;
+        if (sessionView && sessionView.allShown === true) setSessionPages(1);
+        else setSessionPages(state.sessionPages + 1);
+        return;
+      }
+      var sessionsCollapse = event.target.closest ? event.target.closest('[data-sessions-collapse]') : null;
+      if (sessionsCollapse) {
+        event.preventDefault();
+        setSessionPages(1);
+        return;
+      }
+      var daysCollapse = event.target.closest ? event.target.closest('[data-days-collapse]') : null;
+      if (daysCollapse) {
+        event.preventDefault();
+        setDailyPages(1);
         return;
       }
       var daysToggle = event.target.closest ? event.target.closest('[data-days-toggle]') : null;
       if (daysToggle) {
         event.preventDefault();
-        setShowAllDays(!state.showAllDays);
+        var dailyView = state.lastView && state.lastView.view === 'daily' ? state.lastView : null;
+        if (dailyView && dailyView.allShown === true) setDailyPages(1);
+        else setDailyPages(state.dailyPages + 1);
         return;
       }
       var row = event.target.closest ? event.target.closest('tr.session, tr.day') : null;

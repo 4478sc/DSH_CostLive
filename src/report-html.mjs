@@ -496,6 +496,9 @@ export function renderHtml(report, options = {}) {
     transition: background .15s ease, border-color .15s ease;
   }
   .more-btn:hover { background: var(--accent-soft); border-color: #99f6e4; }
+.more-btn-quiet { margin-left: 8px; color: var(--muted); background: transparent; border-color: transparent; }
+.more-btn-quiet:hover { background: #eef2f6; border-color: var(--line); }
+.more-btn-quiet[hidden] { display: none !important; }
   .more-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   @keyframes run-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
   .detail-inner { padding: 14px 20px 18px 28px; }
@@ -606,7 +609,7 @@ export function renderHtml(report, options = {}) {
     </div>
     ${
       hiddenCount > 0
-        ? `<div class="sessions-more" data-sessions-more><button type="button" class="more-btn" data-sessions-toggle data-more-label="${escapeHtml(moreLabel)}" aria-expanded="false">${escapeHtml(moreLabel)}</button></div>`
+        ? `<div class="sessions-more" data-sessions-more><button type="button" class="more-btn" data-sessions-toggle data-more-label="${escapeHtml(moreLabel)}" aria-expanded="false">${escapeHtml(moreLabel)}</button><button type="button" class="more-btn more-btn-quiet" data-sessions-collapse hidden>${escapeHtml(tr('more.less'))}</button></div>`
         : ''
     }
   </section>
@@ -623,7 +626,7 @@ export function renderHtml(report, options = {}) {
     </div>
     ${
       dailyHiddenCount > 0
-        ? `<div class="sessions-more" data-days-more><button type="button" class="more-btn" data-days-toggle data-more-label="${escapeHtml(dailyMoreLabel)}" aria-expanded="false">${escapeHtml(dailyMoreLabel)}</button></div>`
+        ? `<div class="sessions-more" data-days-more><button type="button" class="more-btn" data-days-toggle data-more-label="${escapeHtml(dailyMoreLabel)}" aria-expanded="false">${escapeHtml(dailyMoreLabel)}</button><button type="button" class="more-btn more-btn-quiet" data-days-collapse hidden>${escapeHtml(tr('more.less'))}</button></div>`
         : ''
     }
     <div class="note">${escapeHtml(tr('section.daily.hint'))}</div>
@@ -669,8 +672,9 @@ ${timeRangeRuntimeSource()}
     window.__DSH_I18N__ = i18n;
     var range = runtime.normalizeTimeRange(urlParam('range') || runtime.readSavedRange(storage));
     var view = runtime.normalizeView(urlParam('view') || runtime.readSavedView(storage));
-    var expanded = false;
-    var daysExpanded = false;
+    var sessionPages = 1;
+    var dailyPages = 1;
+    var lastResult = null;
     function urlParam(name) {
       try {
         return new URLSearchParams(window.location.search).get(name);
@@ -689,13 +693,14 @@ ${timeRangeRuntimeSource()}
       }
     }
     function applyView() {
-      runtime.applyTimeRange(document, {
+      lastResult = runtime.applyTimeRange(document, {
         range: range,
-        showAll: expanded,
-        showAllDays: daysExpanded,
+        sessionPages: sessionPages,
+        dailyPages: dailyPages,
         view: view,
         messages: i18n.messages,
       });
+      return lastResult;
     }
     runtime.bindRangeSelector(document, function (next) {
       range = next;
@@ -721,21 +726,38 @@ ${timeRangeRuntimeSource()}
       var button = section.querySelector('[data-sessions-toggle]');
       if (button) {
         button.addEventListener('click', function () {
-          expanded = !expanded;
+          var last = lastResult;
+          if (last && last.view === 'session' && last.allShown === true) sessionPages = 1;
+          else sessionPages += 1;
           applyView();
-          section.classList.toggle('sessions-expanded', expanded);
         });
       }
+    }
+    var sessionsCollapse = section && section.querySelector('[data-sessions-collapse]');
+    if (sessionsCollapse) {
+      sessionsCollapse.addEventListener('click', function () {
+        sessionPages = 1;
+        applyView();
+      });
     }
     var dailySection = document.getElementById('daily');
     if (dailySection) {
       var daysButton = dailySection.querySelector('[data-days-toggle]');
       if (daysButton) {
         daysButton.addEventListener('click', function () {
-          daysExpanded = !daysExpanded;
+          var last = lastResult;
+          if (last && last.view === 'daily' && last.allShown === true) dailyPages = 1;
+          else dailyPages += 1;
           applyView();
         });
       }
+    }
+    var daysCollapse = dailySection && dailySection.querySelector('[data-days-collapse]');
+    if (daysCollapse) {
+      daysCollapse.addEventListener('click', function () {
+        dailyPages = 1;
+        applyView();
+      });
     }
     applyView();
   })();

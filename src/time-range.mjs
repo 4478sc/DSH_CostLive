@@ -518,7 +518,7 @@ function bindViewSelector(doc, onChange) {
  * only that day's share, so the cards answer "how much was spent in this
  * window" rather than "what did the sessions created in this window cost".
  */
-function applyDailyView(doc, range, now, days, messages, showAllDays) {
+function applyDailyView(doc, range, now, days, messages, showAllDays, dailyPages) {
   var sessionsSection = doc.getElementById('sessions');
   if (sessionsSection) sessionsSection.setAttribute('hidden', '');
   var dailySection = doc.getElementById('daily');
@@ -543,7 +543,7 @@ function applyDailyView(doc, range, now, days, messages, showAllDays) {
     row.classList.toggle('day-extra', extra);
     if (detail) detail.classList.toggle('day-extra', extra);
     row.removeAttribute('data-range-hidden');
-    if (extra && !showAllDays) {
+    if (extra && kept > DAILY_PAGE_SIZE * dailyPages) {
       row.setAttribute('hidden', '');
       if (detail) {
         detail.setAttribute('hidden', '');
@@ -579,19 +579,29 @@ function applyDailyView(doc, range, now, days, messages, showAllDays) {
 
   // The daily table shows the most recent week first; older days sit behind
   // the same "show more" affordance the session table uses.
-  var dayExtraCount = Math.max(0, kept - DAILY_PAGE_SIZE);
+  var dayShown = Math.min(kept, DAILY_PAGE_SIZE * dailyPages);
+  var dayExtraCount = Math.max(0, kept - dayShown);
+  var dayAllShown = dayExtraCount === 0 && kept > DAILY_PAGE_SIZE;
   var dayMore = doc.querySelector('[data-days-more]');
   if (dayMore) {
-    if (dayExtraCount === 0) dayMore.setAttribute('hidden', '');
+    if (kept <= DAILY_PAGE_SIZE) dayMore.setAttribute('hidden', '');
     else dayMore.removeAttribute('hidden');
     var dayToggle = doc.querySelector('[data-days-toggle]');
     if (dayToggle) {
-      var dayLabel = dayExtraCount > 0
-        ? uiText(messages, 'more.days.show', { count: dayExtraCount }) || '显示更多（还有 ' + dayExtraCount + ' 天）'
-        : uiText(messages, 'more.days.plain') || '显示更多';
+      var dayLabel =
+        dayExtraCount > 0
+          ? uiText(messages, 'more.days.show', { count: dayExtraCount }) || '显示更多（还有 ' + dayExtraCount + ' 天）'
+          : kept > DAILY_PAGE_SIZE
+            ? uiText(messages, 'more.days.less') || '收起'
+            : uiText(messages, 'more.days.plain') || '显示更多';
       dayToggle.setAttribute('data-more-label', dayLabel);
-      dayToggle.textContent = showAllDays && dayExtraCount > 0 ? (uiText(messages, 'more.days.less') || '收起') : dayLabel;
-      dayToggle.setAttribute('aria-expanded', showAllDays && dayExtraCount > 0 ? 'true' : 'false');
+      dayToggle.textContent = dayLabel;
+      var dayCollapse = doc.querySelector('[data-days-collapse]');
+      if (dayCollapse) {
+        if (dailyPages > 1 && !dayAllShown) dayCollapse.removeAttribute('hidden');
+        else dayCollapse.setAttribute('hidden', '');
+      }
+      dayToggle.setAttribute('aria-expanded', dayAllShown ? 'true' : 'false');
     }
   }
 
@@ -618,7 +628,18 @@ function applyDailyView(doc, range, now, days, messages, showAllDays) {
   }
   setViewButtons(doc, 'daily');
 
-  return { range: range, view: 'daily', kept: kept, total: rows.length, days: stats.days, stats: stats };
+  return {
+    range: range,
+    view: 'daily',
+    kept: kept,
+    total: rows.length,
+    days: stats.days,
+    extra: dayExtraCount,
+    pages: dailyPages,
+    pageSize: DAILY_PAGE_SIZE,
+    allShown: dayAllShown,
+    stats: stats,
+  };
 }
 
 /**
@@ -631,6 +652,9 @@ function applyTimeRange(doc, options) {
   var range = normalizeTimeRange(options.range);
   var view = normalizeView(options.view);
   var showAll = options.showAll === true;
+  // Incremental paging: each "show more" click reveals one more page.
+  var sessionPages = Math.floor(Number(options.sessionPages));
+  if (!(sessionPages >= 1)) sessionPages = showAll ? Infinity : 1;
   var messages = options.messages && typeof options.messages === 'object' ? options.messages : null;
   var now = typeof options.now === 'number' && Number.isFinite(options.now) ? options.now : Date.now();
   var data = readDataset(doc);
@@ -638,7 +662,9 @@ function applyTimeRange(doc, options) {
   var dailyDays = data && Array.isArray(data.days) ? data.days : [];
   var pageSize = data && typeof data.pageSize === 'number' && data.pageSize > 0 ? data.pageSize : 5;
   var showAllDays = options.showAllDays === true;
-  if (view === 'daily') return applyDailyView(doc, range, now, dailyDays, messages, showAllDays);
+  var dailyPages = Math.floor(Number(options.dailyPages));
+  if (!(dailyPages >= 1)) dailyPages = showAllDays ? Infinity : 1;
+  if (view === 'daily') return applyDailyView(doc, range, now, dailyDays, messages, showAllDays, dailyPages);
   var filtered = allSessions === null ? null : filterSessionsByRange(allSessions, range, now);
   var visible = Object.create(null);
   if (filtered !== null) {
@@ -673,7 +699,7 @@ function applyTimeRange(doc, options) {
     var extra = kept > pageSize;
     row.classList.toggle('session-extra', extra);
     if (detail) detail.classList.toggle('session-extra', extra);
-    if (extra && !showAll) {
+    if (extra && kept > pageSize * sessionPages) {
       row.setAttribute('hidden', '');
       if (detail) {
         detail.setAttribute('hidden', '');
@@ -704,17 +730,30 @@ function applyTimeRange(doc, options) {
     else empty.setAttribute('hidden', '');
   }
 
-  var extraCount = Math.max(0, kept - pageSize);
+  // Rows past the revealed pages are hidden; the button reveals one more page
+  // per click and turns into "show less" once everything is visible.
+  var shownCount = Math.min(kept, pageSize * sessionPages);
+  var extraCount = Math.max(0, kept - shownCount);
+  var allShown = extraCount === 0 && kept > pageSize;
   var more = doc.querySelector('[data-sessions-more]');
   if (more) {
-    if (extraCount === 0) more.setAttribute('hidden', '');
+    if (kept <= pageSize) more.setAttribute('hidden', '');
     else more.removeAttribute('hidden');
     var toggle = doc.querySelector('[data-sessions-toggle]');
     if (toggle) {
-      var moreLabel = extraCount > 0 ? (uiText(messages, 'more.show', { count: extraCount }) || '显示更多（还有 ' + extraCount + ' 个）') : (uiText(messages, 'more.show.plain') || '显示更多');
+      var moreLabel = extraCount > 0
+        ? (uiText(messages, 'more.show', { count: extraCount }) || '显示更多（还有 ' + extraCount + ' 个）')
+        : kept > pageSize
+          ? (uiText(messages, 'more.less') || '收起')
+          : (uiText(messages, 'more.show.plain') || '显示更多');
       toggle.setAttribute('data-more-label', moreLabel);
-      toggle.textContent = showAll && extraCount > 0 ? (uiText(messages, 'more.less') || '收起') : moreLabel;
-      toggle.setAttribute('aria-expanded', showAll && extraCount > 0 ? 'true' : 'false');
+      toggle.textContent = moreLabel;
+      var collapseToggle = doc.querySelector('[data-sessions-collapse]');
+      if (collapseToggle) {
+        if (sessionPages > 1 && !allShown) collapseToggle.removeAttribute('hidden');
+        else collapseToggle.setAttribute('hidden', '');
+      }
+      toggle.setAttribute('aria-expanded', allShown ? 'true' : 'false');
     }
   }
 
@@ -748,7 +787,17 @@ function applyTimeRange(doc, options) {
   if (sessionsSection) sessionsSection.removeAttribute('hidden');
   setViewButtons(doc, 'session');
 
-  return { range: range, view: 'session', kept: kept, total: total, extra: extraCount, stats: stats };
+  return {
+    range: range,
+    view: 'session',
+    kept: kept,
+    total: total,
+    extra: extraCount,
+    pages: sessionPages,
+    pageSize: pageSize,
+    allShown: allShown,
+    stats: stats,
+  };
 }
 
 function readSavedRange(storage) {

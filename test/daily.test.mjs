@@ -313,6 +313,41 @@ test('the daily runtime is self-contained and exposes storage helpers', () => {
   assert.doesNotMatch(timeRangeRuntimeSource(), /\bimport\b|export /u);
 });
 
+test('the daily button reveals one week at a time', () => {
+  const tokens = { uncachedInputTokens: 10, outputTokens: 1, cacheWriteTokens: 0, cacheReadTokens: 0 };
+  const days = Array.from({ length: 15 }, (_, index) => ({
+    day: 'd' + index,
+    dayStart: NOW - index * 86_400_000,
+    unknown: false,
+    totals: { ...tokens, totalTokens: 11, costMicroCny: 1000, costMicroUsd: 0, cacheHit: 0.5, samples: 1 },
+    sessions: [
+      {
+        id: 's' + index,
+        title: 'day ' + index,
+        tokens: { ...tokens },
+        samples: 1,
+        costMicroCny: 1000,
+        costMicroUsd: 0,
+        models: [{ provider: 'p', model: 'm', priceKey: 'm', priced: true, tokens: { ...tokens }, costMicroCny: 1000, costMicroUsd: 0 }],
+      },
+    ],
+  }));
+  const dom = makeDailyDom(days);
+  const runtime = runtimeForTests();
+  const visible = () => dom.rows.filter((row) => !row.hasAttribute('hidden')).length;
+
+  let result = runtime.applyTimeRange(dom.doc, { range: 'all', view: 'daily', now: NOW });
+  assert.equal(visible(), 7, 'first week');
+  assert.equal(result.allShown, false);
+
+  result = runtime.applyTimeRange(dom.doc, { range: 'all', view: 'daily', dailyPages: 2, now: NOW });
+  assert.equal(visible(), 14);
+
+  result = runtime.applyTimeRange(dom.doc, { range: 'all', view: 'daily', dailyPages: 3, now: NOW });
+  assert.equal(visible(), 15);
+  assert.equal(result.allShown, true);
+});
+
 test('the daily table shows the latest seven days and expands on demand', () => {
   const tokens = { uncachedInputTokens: 10, outputTokens: 1, cacheWriteTokens: 0, cacheReadTokens: 0 };
   const days = Array.from({ length: 10 }, (_, index) => {

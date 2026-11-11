@@ -47,7 +47,7 @@ collect / price / render code as the report, so page numbers always match the CL
 | Four time ranges | `All time` / `Last 30 days` / `Last 7 days` / `Today`; cards, model table and detail rows recompute together and the choice is persisted |
 | Per-day view | "By session / By day"; the by-day view buckets each sample by its own time, splitting midnight-crossing sessions in two, so it answers "how much did today actually cost" |
 | Running first | Running main sessions → running subagents → finished (cost descending); running rows are highlighted with a pulsing label; a step with no update for 2 hours counts as abandoned (a killed DSH leaves an `openStep` behind) |
-| First 5 rows | Only five rows on first paint, then "show more (N left)"; the expansion state survives refreshes and filters |
+| First 5 rows | Only five rows on first paint; "show more (N left)" **reveals five more rows per click**; once expanded, a "show less" button collapses straight back to the first page (the main button also becomes "show less" when everything is visible), and the state survives refreshes and filters |
 | Per-model summary | Four token buckets, cost, **average price per 1M tokens** and share per provider/model; unpriced models are flagged; two-tier models (DeepSeek) are split into peak/off-peak rows |
 | Peak/off-peak pricing | `deepseek-v4.1-flash` picks its tier from **each sample's own timestamp** on weekdays, and a session that crosses the boundary is priced in two parts; summary, session detail and daily detail all show the "（峰值）/（谷值）" rows |
 | Cache and unit price | Cache hit rate and cache-read volume; "Token均价" (price per million tokens) only counts priced tokens, keeps CNY and USD apart and ignores unpriced models |
@@ -258,7 +258,7 @@ schtasks /Create /TN DSH_CostLive_SyncKeepAlive /SC MINUTE /MO 5 /F ^
   the model table switch to sample totals — this answers "how much did today actually cost". In the by-day view
   Today / 7 days / 30 days are calendar days (including today) in the local time zone.
 - **English UI**: use the “中文” / “English” link in the page header, or add `?lang=en` to the URL; the server also honours the browser's `Accept-Language`. All 界面 strings live in `src/i18n.mjs`, and the two dictionaries must stay identical (`npm run check:i18n`).
-- **Daily folding**: the by-day table shows the latest seven days first; older days sit behind a “Show more (N more days)” button, and the expanded state survives refreshes and view switches.
+- **Daily folding**: the by-day table shows the latest seven days first; older days sit behind a “Show more (N more days)” button that **reveals seven more days per click**, and a “Show less” button collapses straight back to the latest week at any time; the state survives refreshes and view switches.
 - **Session detail**: five rows by default. Click any row to expand its per-model detail, per-turn subtotals and
   every billed sample.
 - **Bottom-right panel**: connection state, data timestamp, countdown to the next refresh, total cost / sessions /

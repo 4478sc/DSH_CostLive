@@ -418,6 +418,7 @@ function makeDom(records, pageSize = 5) {
   const note = makeNode();
   const flag = makeNode({ hidden: '' });
   const more = makeNode();
+  const collapse = makeNode({ hidden: '' });
   const toggle = makeNode();
   for (const range of ['all', '30d', '7d', 'today']) {
     const button = makeNode({ 'data-range': range, 'aria-pressed': range === 'all' ? 'true' : 'false' });
@@ -432,6 +433,7 @@ function makeDom(records, pageSize = 5) {
     querySelector(selector) {
       if (selector === '[data-sessions-more]') return more;
       if (selector === '[data-sessions-toggle]') return toggle;
+      if (selector === '[data-sessions-collapse]') return collapse;
       if (selector === '[data-range-note]') return note;
       if (selector === '[data-range-flag]') return flag;
       return null;
@@ -440,7 +442,7 @@ function makeDom(records, pageSize = 5) {
       return selector === '.time-range-selector .range-btn' ? buttons : [];
     },
   };
-  return { doc, rows, buttons, nodes, note, flag, more, toggle, bar };
+  return { doc, rows, buttons, nodes, note, flag, more, toggle, collapse, bar };
 }
 
 function runtimeForTests() {
@@ -533,6 +535,30 @@ test('applyTimeRange shows the empty state when nothing matches', () => {
   assert.equal(dom.more.hasAttribute('hidden'), true);
   assert.equal(dom.note.textContent, `${formatRangeLabel('today', NOW)} · 0 / 2 个会话`);
   assert.equal(dom.toggle.textContent.includes('显示更多'), true);
+});
+
+test('show more reveals one page at a time instead of everything', () => {
+  const records = Array.from({ length: 12 }, (_, index) => datasetRecord('s' + index, NOW - index * 3600_000));
+  const dom = makeDom(records);
+  const visible = () => dom.rows.filter((row) => !row.hasAttribute('hidden')).length;
+
+  let result = runtime.applyTimeRange(dom.doc, { range: 'all', now: NOW });
+  assert.equal(visible(), 5, 'first page');
+  assert.equal(dom.toggle.textContent, '显示更多（还有 7 个）');
+  assert.equal(result.allShown, false);
+
+  result = runtime.applyTimeRange(dom.doc, { range: 'all', sessionPages: 2, now: NOW });
+  assert.equal(visible(), 10, 'second page');
+  assert.equal(dom.toggle.textContent, '显示更多（还有 2 个）');
+
+  result = runtime.applyTimeRange(dom.doc, { range: 'all', sessionPages: 3, now: NOW });
+  assert.equal(visible(), 12, 'everything is visible now');
+  assert.equal(result.allShown, true);
+  assert.equal(dom.toggle.textContent, '收起');
+  assert.equal(dom.toggle.getAttribute('aria-expanded'), 'true');
+
+  runtime.applyTimeRange(dom.doc, { range: 'all', sessionPages: 1, now: NOW });
+  assert.equal(visible(), 5, 'collapsing goes back to the first page');
 });
 
 test('showAll reveals every filtered row and switches the button label', () => {

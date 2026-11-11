@@ -14,6 +14,7 @@ import { formatPercent } from './format.mjs';
 import { SORT_USD_TO_CNY, averageTokenPrice, formatMoney, formatUsd, sortCostMicro } from './money.mjs';
 import { canonicalProvider, formatCny, formatTokens } from './pricing.mjs';
 import { i18nText } from './i18n.mjs';
+import { billingRuntimeSource } from './billing.mjs';
 
 /** One day in milliseconds; `7d`/`30d` are rolling windows ending at `now`. */
 export const DAY_MS = 86_400_000;
@@ -647,6 +648,39 @@ function applyDailyView(doc, range, now, days, messages, showAllDays, dailyPages
  * survivors, refresh the cards + model table, and move the active pill.
  * Safe to call repeatedly (live fragment swaps, show-more toggles).
  */
+function applyRealPricing(doc, data, range, now, messages) {
+  var real = window.DSH_BILLING.calculate(data.billing.usage, data.billing.config, Object.assign({}, data.billing.bounds, { range: range, now: now }));
+  window.__DSH_REAL_VIEW__ = Object.assign({}, real, { billing: data.billing.config });
+  var stats = real.summary;
+  var translate = function (key, params) { return uiText(messages, key, params) || key; };
+  var average = function (entry) { return entry.tokenPrice.cnyMicroPerM === null && entry.tokenPrice.usdMicroPerM === null ? '—' : formatMoney(entry.tokenPrice.cnyMicroPerM, entry.tokenPrice.usdMicroPerM); };
+  setText(doc.getElementById('stat-cost'), formatMoney(stats.costMicroCny, stats.costMicroUsd));
+  setText(doc.getElementById('stat-cost-note'), translate('billing.range', {days:stats.days,until:real.until,idle:formatUsd(stats.idleMicroUsd/1e6)}));
+  setText(doc.getElementById('stat-tokens'), formatTokens(stats.totalTokens));
+  setText(doc.getElementById('stat-tokens-note'), 'in ' + formatTokens(stats.inputTokens) + ' · out ' + formatTokens(stats.outputTokens));
+  setText(doc.getElementById('stat-cache-read'), formatTokens(stats.cacheReadTokens));
+  setText(doc.getElementById('stat-cache-read-note'), translate('card.cacheRead.note', {percent:formatPercent(stats.cacheHit)}));
+  setText(doc.getElementById('stat-token-price'), average(stats));
+  setText(doc.getElementById('stat-token-price-note'), translate('billing.real') + ' · / 1M tokens');
+  var usage = doc.getElementById('usage-pricing-content'); if (usage) usage.hidden = true;
+  var content = doc.getElementById('real-pricing-content');
+  if (content) {
+    var html = '<div class="note">' + escapeHtml(translate('billing.note')) + '</div>';
+    if (!stats.configured) html += '<div class="note warn">' + escapeHtml(translate('billing.missing')) + '</div>';
+    if (real.unknownTimeTokens) html += '<div class="note warn">' + escapeHtml(translate('billing.unknown',{tokens:real.unknownTimeTokens})) + '</div>';
+    html += '<section><h2>' + escapeHtml(translate('billing.providers')) + '</h2><div class="table-wrap"><table><thead><tr><th>' + translate('table.provider') + '</th><th>Token</th><th>' + translate('table.cost') + '</th><th>' + translate('table.tokenPrice') + '</th><th>' + translate('billing.idle') + '</th></tr></thead><tbody>';
+    real.providers.forEach(function (row) { html += '<tr><td>' + escapeHtml(row.provider) + (row.configured ? '' : ' · ' + escapeHtml(translate('billing.incomplete'))) + '</td><td class="num">' + formatTokens(row.tokens.totalTokens) + '</td><td class="num">' + formatMoney(row.costMicroCny,row.costMicroUsd) + '</td><td class="num">' + average(row) + '</td><td class="num">' + formatUsd(row.idleMicroUsd/1e6) + '</td></tr>'; });
+    html += '</tbody></table></div></section><section><h2>' + escapeHtml(translate('billing.days')) + '</h2><div class="table-wrap" style="max-height:520px;overflow:auto"><table><thead><tr><th>' + translate('table.date') + '</th><th>Token</th><th>' + translate('table.cost') + '</th><th>' + translate('billing.idle') + '</th></tr></thead><tbody>';
+    real.days.forEach(function (day) { html += '<tr><td>' + day.day + '</td><td class="num">' + formatTokens(day.tokens.totalTokens) + '</td><td class="num">' + formatMoney(day.costMicroCny,day.costMicroUsd) + '</td><td class="num">' + formatUsd(day.idleMicroUsd/1e6) + '</td></tr>'; });
+    html += '</tbody></table></div></section><div class="billing-export"><button data-real-export="csv">' + translate('billing.exportcsv') + '</button><button data-real-export="json">' + translate('billing.exportjson') + '</button></div>';
+    content.innerHTML = html;
+  }
+  var selector = doc.querySelector('.view-selector'); if (selector) selector.hidden = true;
+  doc.querySelectorAll('.time-range-selector .range-btn').forEach(function (button) { var active = button.getAttribute('data-range') === range; button.classList.toggle('active', active); button.setAttribute('aria-pressed', String(active)); });
+  setText(doc.querySelector('[data-range-note]'), translate('billing.real') + ' · Asia/Shanghai · ' + (real.from || 'All time') + ' — ' + real.until);
+  return { range: range, view: 'real', stats: stats, days: stats.days, kept: stats.sessions, total: stats.sessions };
+}
+
 function applyTimeRange(doc, options) {
   options = options || {};
   var range = normalizeTimeRange(options.range);
@@ -658,6 +692,7 @@ function applyTimeRange(doc, options) {
   var messages = options.messages && typeof options.messages === 'object' ? options.messages : null;
   var now = typeof options.now === 'number' && Number.isFinite(options.now) ? options.now : Date.now();
   var data = readDataset(doc);
+  if (data && data.billing && data.billing.config.mode === 'real') return applyRealPricing(doc, data, range, now, messages);
   var allSessions = data && Array.isArray(data.sessions) ? data.sessions : null;
   var dailyDays = data && Array.isArray(data.days) ? data.days : [];
   var pageSize = data && typeof data.pageSize === 'number' && data.pageSize > 0 ? data.pageSize : 5;
@@ -872,7 +907,7 @@ export function timeRangeRuntimeSource() {
     .map((fn) => indentSource(fn.toString()))
     .join('\n\n');
 
-  return `(function () {
+  return billingRuntimeSource() + `\n(function () {
   'use strict';
   var DAY_MS = ${DAY_MS};
   var DAILY_PAGE_SIZE = ${DAILY_PAGE_SIZE};

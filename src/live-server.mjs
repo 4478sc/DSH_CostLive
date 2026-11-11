@@ -1,11 +1,13 @@
 /**
  * A tiny local HTTP server for the live dashboard.
  *
- * Routes (all GET/HEAD, no directory serving):
+ * Routes (GET/HEAD unless noted, no directory serving):
  *   /                 the live page (server-rendered snapshot + polling client)
  *   /api/fragment     fresh report body + metadata, consumed every 20 s
  *   /api/report       the same JSON document as `dsh-cost report --format json`
  *   /api/health       liveness/scan diagnostics
+ *   /api/billing      local settings (PUT is loopback-only, same-origin JSON)
+ *   /api/report.csv   current server report in CSV format
  *
  * The server binds to loopback by default and refreshes on demand: each poll
  * re-reads the DSH session logs. A 1-second cache coalesces simultaneous
@@ -25,6 +27,9 @@ import {
   summarizeReport,
 } from './live.mjs';
 import { localeFromAcceptLanguage, normalizeLocale } from './i18n.mjs';
+import { loadBilling, saveBilling } from './billing-config.mjs';
+import { toCsv } from './report-data.mjs';
+import { normalizeBilling } from './billing.mjs';
 
 const JSON_HEADERS = {
   'Content-Type': 'application/json; charset=utf-8',
@@ -158,7 +163,7 @@ export async function startLiveServer(options = {}) {
   let lastSignature = '';
 
   function signatureOf(report) {
-    return `${report.summary.sessions}|${report.summary.costMicroCny}|${report.summary.totalTokens}`;
+    return `${report.summary.sessions}|${report.summary.costMicroCny}|${report.summary.costMicroUsd}|${report.summary.totalTokens}`;
   }
 
   function logChange(previous, report, scanMs) {
@@ -216,8 +221,36 @@ export async function startLiveServer(options = {}) {
   // Fail fast on a bad home / pricing table, exactly like the CLI.
   refresh(true);
 
-  const server = createServer((request, response) => {
+  const server = createServer(async (request, response) => {
     const method = request.method ?? 'GET';
+    if (method === 'PUT' && request.url === '/api/billing') {
+      // Custom JSON header + exact Origin stops CSRF and cross-origin writes.
+      // Host checking also stops DNS rebinding against this local/trusted-LAN service.
+      const peer = request.socket.remoteAddress;
+      if (!['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(peer)) { sendJson(response, 403, { error: 'Settings writes require a loopback connection; use an SSH tunnel for remote administration' }); request.resume(); return; }
+      const authority = request.headers.host ?? '';
+      const hostname = authority.startsWith('[') ? authority.slice(1, authority.indexOf(']')) : authority.split(':')[0];
+      const address = server.address();
+      const allowedHosts = ['localhost', '127.0.0.1', '::1', host, address?.address];
+      const { networkInterfaces } = await import('node:os');
+      for (const entries of Object.values(networkInterfaces())) for (const entry of entries ?? []) allowedHosts.push(entry.address);
+      const origin = request.headers.origin;
+      if (!allowedHosts.includes(hostname) || !origin || origin !== 'http://' + authority || request.headers['x-costlive-settings'] !== '1' || request.headers['content-type'] !== 'application/json' || (request.headers['sec-fetch-site'] && request.headers['sec-fetch-site'] !== 'same-origin')) {
+        sendJson(response, 403, { error: 'Only same-origin settings requests are allowed' }); return;
+      }
+      try {
+        if (Number(request.headers['content-length'] ?? 0) > 65536) { sendJson(response, 413, {error:'Settings body too large'}); request.resume(); return; }
+        let text = ''; let size = 0;
+        for await (const chunk of request) { size += chunk.length; if (size > 65536) { sendJson(response, 413, {error:'Settings body too large'}); request.destroy(); return; } text += chunk.toString('utf8'); }
+        const config = normalizeBilling(JSON.parse(text));
+        if (reportOptions.billingDocument || reportOptions.billingMode || reportOptions.model || reportOptions.workspace || reportOptions.top || reportOptions.pricedOnly) throw new Error('Settings are read-only when report overrides or scope filters are active');
+        saveBilling(reportOptions.billingPath, config);
+        cache = null;
+        refresh(true);
+        sendJson(response, 200, { ok: true, config });
+      } catch (error) { sendJson(response, 400, { error: error.message }); }
+      return;
+    }
     if (method !== 'GET' && method !== 'HEAD') {
       sendText(response, 405, 'Method Not Allowed');
       return;
@@ -277,6 +310,13 @@ export async function startLiveServer(options = {}) {
           headOnly,
         );
         return;
+      }
+      if (pathname === '/api/billing') { sendJson(response, 200, loadBilling(reportOptions.billingPath), headOnly); return; }
+      if (pathname === '/api/report.csv') {
+        const current = refresh(true);
+        const text = toCsv(current.report);
+        response.writeHead(200, { ...JSON_HEADERS, 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': 'attachment; filename="costlive.csv"' });
+        response.end(headOnly ? undefined : text); return;
       }
       if (pathname === '/api/report') {
         const current = refresh(true);

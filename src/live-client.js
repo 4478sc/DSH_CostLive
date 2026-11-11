@@ -414,6 +414,9 @@
     if (typeof html !== 'string' || html.indexOf('<div class="wrap"') === -1) {
       throw new Error('返回的数据格式不正确');
     }
+    // Do not discard unsaved subscription edits during background polling.
+    var editor = document.getElementById('billing-settings');
+    if (editor && editor.open) return false;
     var scrollY = window.scrollY || window.pageYOffset || 0;
     var open = openSessionIds();
     var parsed = new DOMParser().parseFromString(html, 'text/html');
@@ -485,8 +488,7 @@
         if (requestId !== state.requestId) return;
         var before = currentSummary();
         if (payload.html !== state.lastHtml) {
-          applyFragment(payload);
-          state.lastHtml = payload.html;
+          if (applyFragment(payload) !== false) state.lastHtml = payload.html;
         }
         state.busy = false;
         state.error = null;

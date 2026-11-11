@@ -6,6 +6,9 @@ demo-home/
 node_modules/
 npm-debug.log*
 
+# personal subscription history (preserved across deployments)
+config/billing.local.json
+
 # local/temporary
 .tmp/
 *.tmp

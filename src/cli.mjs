@@ -12,9 +12,11 @@ import { renderDetail, renderList, renderModels, verifyProjection } from './repo
 import { discoverSessions, matchSession, readSession } from './sessions.mjs';
 import { applyOfficialOverlay, loadOfficialReport, loadOfficialState, officialWindowTotals } from './opencode-usage.mjs';
 import { loadSources } from './sources.mjs';
+import { collectLiveReport } from './live.mjs';
+import { loadBilling } from './billing-config.mjs';
 
 const COMMANDS = new Set(['list', 'session', 'models', 'report', 'help']);
-const VALUE_FLAGS = new Set(['home', 'workspace', 'model', 'since', 'until', 'format', 'out', 'top', 'pricing', 'usd', 'official']);
+const VALUE_FLAGS = new Set(['home', 'workspace', 'model', 'since', 'until', 'format', 'out', 'top', 'pricing', 'usd', 'official', 'billing', 'billing-mode']);
 
 const HELP = `dsh-cost — DeepSeek Harness 会话费用（CNY）
 
@@ -40,6 +42,8 @@ const HELP = `dsh-cost — DeepSeek Harness 会话费用（CNY）
   --format <fmt>       table | json | csv | html（report 默认 html）
   --out <file>         报告输出文件（html/csv）
   --json               --format json 的简写
+  --billing <file>     本地订阅设置（默认 config/billing.local.json）
+  --billing-mode <m>   usage | real（覆盖默认计费方式）
   --official <file>    官方用量归档配置（默认 config/official.json）
   --no-official        忽略官方用量，全部用本地日志计算
   --verify             仅校验：对比 DSH tokenUsage 投影（有缓存时）
@@ -238,6 +242,24 @@ export function main(argv = process.argv.slice(2)) {
   const format = options.format ?? (command === 'report' ? 'html' : 'table');
   if (!['table', 'json', 'csv', 'html'].includes(format)) {
     process.stderr.write(`dsh-cost: unknown format "${format}" (table|json|csv|html)\n`);
+    return 2;
+  }
+
+  // Real pricing uses the same provider/day pipeline as HTTP and file reports.
+  try {
+    const billing = loadBilling(options.billing);
+    const mode = options['billing-mode'] ?? billing.mode;
+    if (!['usage', 'real'].includes(mode)) throw new Error('Invalid billing mode');
+    if (mode === 'real') {
+      if (command === 'session' || options.verify || options.steps) throw new Error('Real pricing is provider-level; session/steps/verify require usage mode');
+      const report = collectLiveReport({ sources: options.source, sourcesPath: options.sources, home: options.home, billingPath: options.billing, billingMode: mode, pricingDocument: pricing, usdPricingDocument: usdPricing, official: false, since: options.since, until: options.until, model: options.model, workspace: options.workspace, top: options.top, pricedOnly: options['priced-only'] });
+      const text = format === 'json' ? JSON.stringify(report, null, 2) + '\n' : format === 'csv' ? toCsv(report) : format === 'html' ? renderHtml(report) : ['Real price · Asia/Shanghai · provider-level subscription amortization', ...report.providers.map((row) => row.provider + '  ' + formatMoney(row.costMicroCny, row.costMicroUsd) + '  ' + row.tokens.totalTokens + ' tokens'), 'TOTAL  ' + formatMoney(report.summary.costMicroCny, report.summary.costMicroUsd)].join('\n') + '\n';
+      if (options.out || format === 'html') process.stdout.write('Report: ' + writeOut(options.out ?? 'dsh-cost-report.html', text) + '\n');
+      else process.stdout.write(text);
+      return 0;
+    }
+  } catch (error) {
+    process.stderr.write('dsh-cost: ' + error.message + '\n');
     return 2;
   }
 

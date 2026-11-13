@@ -351,10 +351,10 @@ cost = (uncached input × input + output × output + cache write × cacheWrite +
 - For DeepSeek `cacheWrite` equals `input` (a reported cache write is charged as an uncached input); models such
   as `deepseek-v4.1-flash` have **no cache write**, so `cacheWriteTokens` is always 0, that term is multiplied by
   zero and never double-counts the input.
-- Unpriced models still contribute tokens with a zero cost and are listed at the top of the page and in
-  `unpricedModels` in the JSON.
-- Costs are **estimates from configured unit prices** — no batch discounts, tier pricing or refunds — and are not
-  an invoice.
+- Unpriced models still contribute tokens but produce no amount and are excluded from the price average; they are
+  listed at the top of the page and in `unpricedModels` in the JSON (unpriced is not free).
+- Costs are **estimates from configured unit prices** — no batch discounts or refunds — and are not an invoice.
+  The long-context tier is modelled from the public price list (see the USD table below).
 
 Custom tables: edit `config/pricing.json`, or pass `--pricing my-pricing.json`. Model lookup goes exact id →
 strip provider prefix → strip date suffix → alias → longest `*` prefix. Adding a model is one entry in
@@ -362,20 +362,41 @@ strip provider prefix → strip date suffix → alias → longest `*` prefix. Ad
 
 ### USD price table (providers billed in dollars, e.g. codex)
 
-Some providers are billed from the OpenAI API list price in USD, for example `codex`. They are configured in
-[`config/usd-pricing.json`](config/usd-pricing.json) in **USD per 1,000,000 tokens**:
+Some providers are billed in USD, for example the `codex` routes (`codex` / `openai` / `host-codex` are the same
+Codex service). They are configured in [`config/usd-pricing.json`](config/usd-pricing.json) in
+**USD per 1,000,000 tokens**. Six models were read from the public AICodeMirror price list on 2026-11-14
+(<https://www.aicodemirror.ai/pricing> and <https://www.aicodemirror.ai/api/model-pricing>, no login):
 
-| Model | Input (uncached) | Output | Cache write | Cache read |
-|---|---:|---:|---:|---:|
-| `gpt-6.1-sol` | 2 | 10 | 2.5 | 0.1 |
-| `gpt-6-luna` | 0.1 | 0.5 | 0.125 | 0.01 |
+| Model | Tier | Input (uncached) | Output | Cache write | Cache read | Source |
+|---|---|---:|---:|---:|---:|---|
+| `gpt-6.1-sol` | Standard | 2 | 10 | 2.5 | 0.1 | mirror-verified |
+| `gpt-6.1-sol` | Long (> 272,000 input tokens) | 4 | 15 | 5 | 0.2 | mirror-verified |
+| `gpt-6-sol` | Standard | 2 | 10 | 2.5 | 0.2 | mirror-verified |
+| `gpt-6-sol` | Long (> 272,000 input tokens) | 4 | 15 | 5 | 0.4 | mirror-verified |
+| `gpt-6.1-terra` | Standard | 1 | 5 | 1.25 | 0.05 | mirror-verified |
+| `gpt-6.1-terra` | Long (> 272,000 input tokens) | 2 | 7.5 | 2.5 | 0.1 | mirror-verified |
+| `gpt-6-astra` | Standard | 10 | 50 | 12.5 | 1 | mirror-verified |
+| `gpt-6-astra` | Long (> 272,000 input tokens) | 20 | 75 | 25 | 2 | mirror-verified |
+| `gpt-5.6-sol` | Standard | 5 | 30 | 6.25 | 0.5 | mirror-verified |
+| `gpt-5.6-sol` | Long (> 272,000 input tokens) | 10 | 45 | 12.5 | 1 | mirror-verified |
+| `gpt-5.6-terra` | Standard | 2 | 12 | 2.5 | 0.2 | mirror-verified |
+| `gpt-5.6-terra` | Long (> 272,000 input tokens) | 4 | 18 | 5 | 0.4 | mirror-verified |
+| `gpt-6-luna` | Standard | 0.1 | 0.5 | 0.125 | 0.01 | legacy (not re-verified) |
 
+- The long tier is decided **per sample from its own input context**: uncached input + cache write + cache read
+  (**output excluded**) above 272,000 tokens prices all four buckets of that request at the long rates. Like the
+  peak/off-peak tier it is per sample; neither session totals nor output size take part.
+- **Source evidence**: the public page has no literal `$` / `USD` field, only the note "1 USD of usage = N RMB",
+  and `/api/model-pricing` carries no currency field. The table therefore holds public-page base rates in USD
+  with no conversion; it is not a logged-in dashboard channel price.
+- `gpt-6-luna` has no row in that public source, so its previous USD rates stay as a legacy fallback (the page
+  marks it "legacy (not re-verified)"); it is neither deleted nor rewritten. Any other unlisted model keeps the
+  normal resolve behaviour: unpriced (not free), tokens counted, no amount, no "price per 1M" contribution.
 - `providers` lists the providers covered by this table; matching rows record USD only (`costMicroCny` stays 0)
-  and use `priceKey = usd-<model>`, so they join the USD side of "Token均价" just like CNY rows do on theirs.
+  and use `priceKey = usd-<model>`, so they join the USD side of the token-price average.
 - Several routes of the same service fold into one row: `codex` / `openai` / `host-codex` → `codex`,
   `opencode` / `opencode-go` → `opencode` (`canonicalProvider` in `src/pricing.mjs`).
-- The long-context surcharge from the official price list (2× input / 1.5× output above 272k prompt tokens) is
-  not modelled.
+- Real subscription mode (provider-level amortization) never uses this table: a reference price is not a bill.
 - Custom table: `--usd my-usd-pricing.json`; a missing file simply means "no USD table" and is not an error.
 
 ---
@@ -432,7 +453,8 @@ DSH_CostLive/
 ├─ bin/
 │  ├─ dsh-cost.mjs            # CLI entry point
 │  └─ dsh-cost-live.mjs       # live dashboard entry (server / --watch / --once)
-├─ config/pricing.json        # price table (off-peak / peak / aliases)
+├─ config/pricing.json        # CNY price table (off-peak / peak / aliases)
+├─ config/usd-pricing.json    # USD price table (six models + long tier + legacy luna)
 ├─ config/sources.json        # sources: host ~/.dsh + VM mirror .dsh-vm
 ├─ src/
 │  ├─ pricing.mjs             # table normalization, model matching, peak tiers, micro-CNY arithmetic
@@ -448,7 +470,7 @@ DSH_CostLive/
 │  ├─ live.mjs                # live document / fragment / atomic write
 │  ├─ live-server.mjs         # local HTTP server and the three APIs
 │  └─ live-client.js          # browser side: polling, folding, ranges, scroll restore
-├─ test/                      # node:test, 9 files, 64 cases
+├─ test/                      # node:test, 13 files, 125 cases
 ├─ tools/make-demo-home.mjs   # synthetic demo data generator
 ├─ tools/sync-vm-dsh.ps1      # incremental ~/.dsh → .dsh-vm sync from a VMware VM
 ├─ tools/vm-sync-snapshot.sh  # VM-side incremental packer
@@ -474,16 +496,19 @@ npm test
 | File | Cases | Coverage |
 |---|---:|---|
 | `pricing.test.mjs` | 11 | Table normalization, aliases, wildcards, peak tiers, micro-CNY precision, built-in table parity |
-| `engine.test.mjs` | 9 | Streaming replacement, retries, four-bucket merge, zero usage, model switches, opencode pending |
-| `activity.test.mjs` | 7 | `openStep` authority, `turnBoundary` fallback, dual-channel subagent detection, stable three-bucket ordering |
-| `time-range.test.mjs` | 18 | Range boundaries, missing dates, aggregation arithmetic, browser runtime, DOM events, storage fallbacks, HTML integration |
-| `daily.test.mjs` | 7 | Midnight split, unknown-time bucket, calendar boundaries, daily de-duplication, by-day DOM and storage |
+| `usd-pricing.test.mjs` | 17 | USD table and long-context threshold, per-sample tier, luna legacy regression, report metadata, HTML/terminal tables |
+| `engine.test.mjs` | 15 | Streaming replacement, retries, four-bucket merge, zero usage, model switches, opencode pending, USD routes |
+| `activity.test.mjs` | 8 | `openStep` authority, `turnBoundary` fallback, dual-channel subagent detection, stable three-bucket ordering |
+| `billing.test.mjs` | 10 | Subscription amortization, real-price mode, cross-source merge, CSV/HTML integration |
+| `daily.test.mjs` | 11 | Midnight split, unknown-time bucket, calendar boundaries, daily de-duplication, by-day DOM and storage |
+| `i18n.test.mjs` | 5 | Message parity, placeholders, locale normalization |
 | `live.test.mjs` | 6 | Collection/filtering, template splitting, atomic writes, HTTP API |
 | `opencode-usage.test.mjs` | 13 | Official row normalization, de-duplication, session overlay, window totals, cache saving |
 | `sources.test.mjs` | 3 | Multi-source parsing, host+VM merge, degraded missing source |
 | `sessions.test.mjs` | 2 | Session discovery and reading |
+| `time-range.test.mjs` | 22 | Range boundaries, missing dates, aggregation arithmetic, browser runtime, DOM events, storage fallbacks, HTML integration |
 | `zstd.test.mjs` | 2 | Multi-frame decompression, plain JSONL fallback |
-| **Total** | **78** | |
+| **Total** | **125** | |
 
 CI runs the same suite on Node 22 and Node 24 (`.github/workflows/test.yml`). Node 22 still calls the test
 isolation switch `--experimental-test-isolation`, so that job uses `npm run test:node22`.

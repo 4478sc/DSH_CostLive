@@ -1,8 +1,14 @@
 {
   "currency": "USD",
   "unitTokens": 1000000,
-  "_source": "OpenAI API list prices (USD per 1M tokens), from the OpenRouter model catalog 2026-11-11",
-  "_note": "Long-context surcharge above 272k prompt tokens (2x input / 1.5x output on the official page) is not modelled. openai / host-codex are the same Codex service and are priced and grouped with codex.",
+  "source": {
+    "label": "AICodeMirror public pricing",
+    "url": "https://www.aicodemirror.ai/pricing",
+    "api": "https://www.aicodemirror.ai/api/model-pricing",
+    "retrievedAt": "2026-11-14",
+    "note": "Public page and model-pricing API (no login). The page quotes \"1 USD of usage = N RMB\" and the API rows carry no currency field, so the rates marked source=mirror are the public base rates in USD per 1M tokens, not a logged-in dashboard channel price and never converted into CNY. gpt-6-luna has no row in this source; it keeps its previous USD rates (source=legacy, not re-verified) because the dashboard lists no replacement. Models absent from this file keep the normal resolve behaviour (unpriced, never free)."
+  },
+  "longContextThreshold": 272000,
   "providers": [
     "codex",
     "openai",
@@ -10,12 +16,55 @@
   ],
   "models": {
     "gpt-6.1-sol": {
+      "source": "mirror",
       "input": 2,
       "output": 10,
       "cacheWrite": 2.5,
-      "cacheRead": 0.1
+      "cacheRead": 0.1,
+      "long": { "input": 4, "output": 15, "cacheWrite": 5, "cacheRead": 0.2 }
+    },
+    "gpt-6-sol": {
+      "source": "mirror",
+      "input": 2,
+      "output": 10,
+      "cacheWrite": 2.5,
+      "cacheRead": 0.2,
+      "long": { "input": 4, "output": 15, "cacheWrite": 5, "cacheRead": 0.4 }
+    },
+    "gpt-6.1-terra": {
+      "source": "mirror",
+      "input": 1,
+      "output": 5,
+      "cacheWrite": 1.25,
+      "cacheRead": 0.05,
+      "long": { "input": 2, "output": 7.5, "cacheWrite": 2.5, "cacheRead": 0.1 }
+    },
+    "gpt-6-astra": {
+      "source": "mirror",
+      "input": 10,
+      "output": 50,
+      "cacheWrite": 12.5,
+      "cacheRead": 1,
+      "long": { "input": 20, "output": 75, "cacheWrite": 25, "cacheRead": 2 }
+    },
+    "gpt-5.6-sol": {
+      "source": "mirror",
+      "input": 5,
+      "output": 30,
+      "cacheWrite": 6.25,
+      "cacheRead": 0.5,
+      "long": { "input": 10, "output": 45, "cacheWrite": 12.5, "cacheRead": 1 }
+    },
+    "gpt-5.6-terra": {
+      "source": "mirror",
+      "input": 2,
+      "output": 12,
+      "cacheWrite": 2.5,
+      "cacheRead": 0.2,
+      "long": { "input": 4, "output": 18, "cacheWrite": 5, "cacheRead": 0.4 }
     },
     "gpt-6-luna": {
+      "source": "legacy",
       "input": 0.1,
       "output": 0.5,
       "cacheWrite": 0.125,

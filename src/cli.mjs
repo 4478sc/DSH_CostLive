@@ -23,7 +23,7 @@ const HELP = `dsh-cost — DeepSeek Harness 会话费用（CNY）
 用法
   dsh-cost [list] [选项]              会话费用总览（默认命令）
   dsh-cost session <id|前缀> [选项]   单个会话明细
-  dsh-cost models [--pricing <file>]  查看价格表
+  dsh-cost models [--pricing <file>] [--usd <file>]  查看价格表（CNY + USD）
   dsh-cost report [--format html]     生成报告（html/json/csv）
 
 选项
@@ -31,6 +31,7 @@ const HELP = `dsh-cost — DeepSeek Harness 会话费用（CNY）
   --source <label=dir> 追加一个数据源；可重复（例如 主机 / VM）
   --sources <file>     从 JSON 读取多个数据源（label + home）
   --pricing <file>     自定义价格表 JSON（默认 config/pricing.json）
+  --usd <file>         自定义美元价表 JSON（默认 config/usd-pricing.json）
   --workspace <text>   按工作区目录名过滤
   --model <text>       仅显示使用该模型（子串匹配）的会话
   --since <date>       会话创建时间下界（YYYY-MM-DD 或 ISO）
@@ -213,7 +214,7 @@ export function main(argv = process.argv.slice(2)) {
   }
 
   if (command === 'models') {
-    process.stdout.write(`${renderModels(pricing)}\n`);
+    process.stdout.write(`${renderModels(pricing, usdPricing)}\n`);
     return 0;
   }
 
@@ -356,7 +357,7 @@ export function main(argv = process.argv.slice(2)) {
     return report;
   };
   if (format === 'json') {
-    const report = attachOfficial(buildReport({ home, sources: sourceStats, pricing, results, generatedAt }));
+    const report = attachOfficial(buildReport({ home, sources: sourceStats, pricing, usdPricing, results, generatedAt }));
     const text = `${JSON.stringify(report, null, 2)}\n`;
     if (options.out !== undefined) {
       const target = writeOut(options.out, text);
@@ -367,7 +368,7 @@ export function main(argv = process.argv.slice(2)) {
     return 0;
   }
   if (format === 'csv') {
-    const report = attachOfficial(buildReport({ home, sources: sourceStats, pricing, results, generatedAt }));
+    const report = attachOfficial(buildReport({ home, sources: sourceStats, pricing, usdPricing, results, generatedAt }));
     if (options.out !== undefined) {
       // A UTF-8 BOM keeps Excel on Windows from reading Chinese titles as ANSI.
       const target = writeOut(options.out, `\uFEFF${toCsv(report)}`);
@@ -378,7 +379,7 @@ export function main(argv = process.argv.slice(2)) {
     return 0;
   }
   if (format === 'html') {
-    const report = attachOfficial(buildReport({ home, sources: sourceStats, pricing, results, generatedAt }));
+    const report = attachOfficial(buildReport({ home, sources: sourceStats, pricing, usdPricing, results, generatedAt }));
     const target = writeOut(options.out ?? 'dsh-cost-report.html', renderHtml(report));
     process.stdout.write(`HTML 报告已生成: ${target}\n`);
     process.stdout.write(`会话 ${report.summary.sessions} 个 · 总费用 ${formatMoney(report.summary.costMicroCny, report.summary.costMicroUsd)} · Token ${report.summary.totalTokens.toLocaleString('en-US')}\n`);

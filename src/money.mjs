@@ -35,9 +35,9 @@ export function formatUsd(value) {
  *
  * Only tokens that actually carry a price are counted: locally priced models
  * contribute to the CNY average, official OpenCode rows to the USD one.
- * Unpriced models (e.g. `gpt-6.1-sol`) and official usage still waiting for a
- * console row (`opencode-pending`) are excluded from both the cost and the
- * token count, so they cannot drag the average down.
+ * Unpriced models (any id absent from the active price table) and official
+ * usage still waiting for a console row (`opencode-pending`) are excluded
+ * from both the cost and the token count, so they cannot drag the average down.
  *
  * @returns {{cnyTokens:number, usdTokens:number, cnyMicroPerM:number, usdMicroPerM:number}}
  */

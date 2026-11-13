@@ -18,11 +18,14 @@ import {
   canonicalProvider,
   costMicroCny,
   costMicroUsd,
+  DEFAULT_USD_LONG_CONTEXT_THRESHOLD,
   isOfficialProvider,
   isUsdProvider,
   priceTier,
   resolvePrice,
   resolveUsdPrice,
+  usdRateAt,
+  usdTierOf,
   zeroBuckets,
 } from './pricing.mjs';
 import { sortCostMicro } from './money.mjs';
@@ -115,12 +118,20 @@ export function analyzeEvents(events, pricing, usdPricing = null) {
         // opencode/opencode-go is billed by the OpenCode console: its cost only
         // exists as official USD rows, so the CNY table must stay out of it.
         const officialProvider = isOfficialProvider(active.provider);
-        const lookup = resolvePrice(active.model, pricing);
-        const resolved = officialProvider ? null : lookup;
         // Dollar-billed routes (codex) are costed from the USD list price and
         // never from the CNY table, so the two currencies stay separate.
         const usdResolved =
           !officialProvider && isUsdProvider(active.provider, usdPricing) ? resolveUsdPrice(active.model, usdPricing) : null;
+        // A USD-listed model is billed only in USD: the CNY lookup (and with it
+        // the CNY peak/off-peak tier split) must not participate even when the
+        // same model id exists in both documents.
+        const lookup = usdResolved === null ? resolvePrice(active.model, pricing) : null;
+        const resolved = officialProvider ? null : lookup;
+        // Long-context tariff: the provider bills each request by its own
+        // prompt size, so every sample selects its tier from its own input
+        // buckets (never from output or a session total).
+        const usdThreshold = usdPricing?.longContextThreshold ?? DEFAULT_USD_LONG_CONTEXT_THRESHOLD;
+        const usdRate = usdResolved === null ? null : usdRateAt(buckets, usdResolved.price, usdThreshold);
         const record = {
           seq: event.seq,
           time: event.time,
@@ -130,19 +141,17 @@ export function analyzeEvents(events, pricing, usdPricing = null) {
           model: active.model,
           priceKey: officialProvider ? 'opencode-pending' : usdResolved !== null ? `usd-${usdResolved.key}` : (resolved?.key ?? null),
           priced: resolved !== null || usdResolved !== null,
-          // Peak/off split for two-tier models. Official rows have no CNY price,
-          // so the lookup is only used to know whether the model is tiered.
+          // Peak/off split for CNY two-tier models only; USD rows have
+          // `lookup === null` and therefore no CNY tier.
           tier: priceTier(lookup?.price ?? null, event.time),
           officialProvider,
           buckets,
           // `event.time` selects the tier: two-tier models (DeepSeek) bill
           // off-peak samples at the discounted rate of the sample's own clock.
           costMicroCny: resolved === null ? 0 : costMicroCny(buckets, resolved.price, event.time),
-          costMicroUsd: usdResolved === null ? 0 : costMicroUsd(buckets, usdResolved.price),
-          cacheSavingMicroUsd:
-            usdResolved === null
-              ? 0
-              : Math.round(buckets.cacheReadTokens * (usdResolved.price.input - usdResolved.price.cacheRead)),
+          costMicroUsd: usdResolved === null ? 0 : costMicroUsd(buckets, usdResolved.price, usdThreshold),
+          cacheSavingMicroUsd: usdRate === null ? 0 : Math.round(buckets.cacheReadTokens * (usdRate.input - usdRate.cacheRead)),
+          usdTier: usdResolved === null ? null : usdTierOf(buckets, usdResolved.price, usdThreshold),
         };
         if (!officialProvider && !resolved && !usdResolved && active.model) warnings.push(`no price for model "${active.model}" (provider ${active.provider ?? 'unknown'})`);
         if (last !== null && last.turn === turn && last.step === step) {

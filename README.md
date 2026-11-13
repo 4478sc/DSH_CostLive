@@ -308,8 +308,8 @@ cost = (未缓存输入 × input + 输出 × output + 缓存写 × cacheWrite + 
   周末与 `peakHours.holidays` 中的日期按谷值。
 - `cacheWrite` 价对 DeepSeek 等于 `input`（若上报缓存写，按未命中输入计）；但 `deepseek-v4.1-flash`
   等模型**没有缓存写**，`cacheWriteTokens` 恒为 0，该项价格乘 0，**不会与 `input` 重复计入总价**。
-- 未定价模型仍统计 token，费用记 0，并在页面顶部与 JSON 的 `unpricedModels` 中列出。
-- 费用是**按配置单价的估算**，不含批处理折扣、阶梯价、退款，不是账单凭证。
+- 未定价模型仍统计 token，但不产生金额、不计入 Token均价，并在页面顶部与 JSON 的 `unpricedModels` 中列出（未定价 ≠ 免费）。
+- 费用是**按配置单价的估算**，不含批处理折扣、退款，不是账单凭证；长上下文档位已按公开价目建模（见下一节的 USD 表）。
 
 自定义价表：编辑 `config/pricing.json`，或 `--pricing my-pricing.json`。模型匹配依次为
 精确 id → 去 provider 前缀 → 去日期后缀 → 别名 → `*` 最长前缀通配。加模型只需在 `models`
@@ -317,19 +317,40 @@ cost = (未缓存输入 × input + 输出 × output + 缓存写 × cacheWrite + 
 
 ### 美元价表（codex 等按美元计费的提供方）
 
-有些提供方按 OpenAI 官方 API 价目计费（美元），例如 `codex`。它们在
-[`config/usd-pricing.json`](config/usd-pricing.json) 里配置，单位 **USD / 1,000,000 tokens**：
+有些提供方按美元计费，例如 `codex` 路由（`codex` / `openai` / `host-codex` 是同一 Codex 服务）。它们在
+[`config/usd-pricing.json`](config/usd-pricing.json) 里配置，单位 **USD / 1,000,000 tokens**。
+本次 6 个型号取自 AICodeMirror 公开价目（<https://www.aicodemirror.ai/pricing> 与
+<https://www.aicodemirror.ai/api/model-pricing>，2026-11-14 读取，未登录）：
 
-| 模型 | 输入（未缓存） | 输出 | 缓存写 | 缓存读 |
-|---|---:|---:|---:|---:|
-| `gpt-6.1-sol` | 2 | 10 | 2.5 | 0.1 |
-| `gpt-6-luna` | 0.1 | 0.5 | 0.125 | 0.01 |
+| 型号 | 档位 | 输入（未缓存） | 输出 | 缓存写 | 缓存读 | 来源 |
+|---|---|---:|---:|---:|---:|---|
+| `gpt-6.1-sol` | 标准 | 2 | 10 | 2.5 | 0.1 | 公开页核实 |
+| `gpt-6.1-sol` | 长档（> 272,000 输入 tokens） | 4 | 15 | 5 | 0.2 | 公开页核实 |
+| `gpt-6-sol` | 标准 | 2 | 10 | 2.5 | 0.2 | 公开页核实 |
+| `gpt-6-sol` | 长档（> 272,000 输入 tokens） | 4 | 15 | 5 | 0.4 | 公开页核实 |
+| `gpt-6.1-terra` | 标准 | 1 | 5 | 1.25 | 0.05 | 公开页核实 |
+| `gpt-6.1-terra` | 长档（> 272,000 输入 tokens） | 2 | 7.5 | 2.5 | 0.1 | 公开页核实 |
+| `gpt-6-astra` | 标准 | 10 | 50 | 12.5 | 1 | 公开页核实 |
+| `gpt-6-astra` | 长档（> 272,000 输入 tokens） | 20 | 75 | 25 | 2 | 公开页核实 |
+| `gpt-5.6-sol` | 标准 | 5 | 30 | 6.25 | 0.5 | 公开页核实 |
+| `gpt-5.6-sol` | 长档（> 272,000 输入 tokens） | 10 | 45 | 12.5 | 1 | 公开页核实 |
+| `gpt-5.6-terra` | 标准 | 2 | 12 | 2.5 | 0.2 | 公开页核实 |
+| `gpt-5.6-terra` | 长档（> 272,000 输入 tokens） | 4 | 18 | 5 | 0.4 | 公开页核实 |
+| `gpt-6-luna` | 标准 | 0.1 | 0.5 | 0.125 | 0.01 | 沿用旧价（未核实） |
 
+- 长档判定按**单条采样自己的输入上下文**：未缓存输入 + 缓存写 + 缓存读（**不含输出**）超过
+  272,000 tokens 时，该请求四个桶全部按长档价；与峰谷判定一样逐采样，会话累计或输出大小都不参与。
+- **来源证据**：公开页没有字面 `$` / `USD` 字段，只有「1 美元用量 = N 人民币」的换算标注，
+  `/api/model-pricing` 也没有币种字段。因此表内是**公开页基准的美元价**，不做换汇；
+  不能当作登录 dashboard 后的个人渠道价。
+- `gpt-6-luna` 在该公开源没有记录，保留原有美元价作为 legacy fallback（页面标「沿用旧价（未核实）」），
+  不删除、不改写；其他未出现在本表的模型沿用原 resolve 行为——未定价（不是免费），只统计 token，
+  不产生金额、不进「Token均价」。
 - `providers` 列出哪些提供方走这张表；命中的行只记美元（`costMicroCny` 保持 0），
   `priceKey` 为 `usd-<模型>`，与 CNY 行一样参与「Token均价」的美元侧。
 - 同一服务的多条路由合并成一行：`codex` / `openai` / `host-codex` → `codex`，
   `opencode` / `opencode-go` → `opencode`（`src/pricing.mjs` 的 `canonicalProvider`）。
-- 官方价目里的长上下文加价（>272k prompt tokens 的 2× 输入 / 1.5× 输出）未建模。
+- 真实订阅模式（按提供方摊销）不使用本表：参考价不会被当成真实账单。
 - 自定义：`--usd my-usd-pricing.json`；文件不存在时视为「没有美元价表」，不会报错。
 
 ---
@@ -385,7 +406,8 @@ DSH_CostLive/
 ├─ bin/
 │  ├─ dsh-cost.mjs            # CLI 入口
 │  └─ dsh-cost-live.mjs       # 实时面板入口（server / --watch / --once）
-├─ config/pricing.json        # 价表（谷/峰/别名）
+├─ config/pricing.json        # CNY 价表（谷/峰/别名）
+├─ config/usd-pricing.json    # USD 价表（6 型号标准价 + 长档 + luna legacy）
 ├─ config/sources.json        # 数据源：主机 ~/.dsh + VM 镜像 .dsh-vm
 ├─ src/
 │  ├─ pricing.mjs             # 价表归一、模型匹配、峰谷判定、micro-CNY 计价
@@ -401,7 +423,7 @@ DSH_CostLive/
 │  ├─ live.mjs                # 实时页文档 / 片段 / 原子写入
 │  ├─ live-server.mjs         # 本地 HTTP 服务与三个 API
 │  └─ live-client.js          # 浏览器端：轮询、折叠、范围、滚动恢复
-├─ test/                      # node:test，9 个文件 64 项
+├─ test/                      # node:test，13 个文件 125 项
 ├─ tools/make-demo-home.mjs   # 合成演示数据生成器
 ├─ tools/sync-vm-dsh.ps1      # 从 VMware VM 增量同步 ~/.dsh 到 .dsh-vm
 ├─ tools/vm-sync-snapshot.sh  # VM 端增量打包脚本
@@ -427,16 +449,19 @@ npm test
 | 文件 | 项数 | 覆盖 |
 |---|---:|---|
 | `pricing.test.mjs` | 11 | 价格归一、别名、通配、峰谷判定、micro-CNY 精度、内置表一致性 |
-| `engine.test.mjs` | 9 | 流式样本替换、重试、四桶归并、零用量、模型切换、opencode 待官网 |
-| `activity.test.mjs` | 7 | `openStep` 权威性、`turnBoundary` 回退、子代理双通道识别、三桶稳定排序 |
-| `time-range.test.mjs` | 18 | 四档边界、缺失日期、聚合算术、浏览器运行时、DOM 事件、存储容错、HTML 集成 |
-| `daily.test.mjs` | 7 | 跨午夜拆分、未知时间桶、自然日边界、按天聚合去重、按天视图 DOM/存储 |
+| `usd-pricing.test.mjs` | 17 | USD 价表与长档阈值、逐采样选档、luna legacy 回归、report 元数据、HTML/终端表 |
+| `engine.test.mjs` | 15 | 流式样本替换、重试、四桶归并、零用量、模型切换、opencode 待官网、USD 路由 |
+| `activity.test.mjs` | 8 | `openStep` 权威性、`turnBoundary` 回退、子代理双通道识别、三桶稳定排序 |
+| `billing.test.mjs` | 10 | 订阅摊销、真实价格模式、跨来源合并、CSV/HTML 集成 |
+| `daily.test.mjs` | 11 | 跨午夜拆分、未知时间桶、自然日边界、按天聚合去重、按天视图 DOM/存储 |
+| `i18n.test.mjs` | 5 | 中英词条、占位符、locale 归一 |
 | `live.test.mjs` | 6 | 采集/过滤、模板拆分、原子写入、HTTP API |
 | `opencode-usage.test.mjs` | 13 | 官方行归一、去重、会话覆盖、窗口合计、缓存节省 |
 | `sources.test.mjs` | 3 | 多数据源解析、主机+VM 合并、缺失数据源降级 |
 | `sessions.test.mjs` | 2 | 会话发现与读取 |
+| `time-range.test.mjs` | 22 | 四档边界、缺失日期、聚合算术、浏览器运行时、DOM 事件、存储容错、HTML 集成 |
 | `zstd.test.mjs` | 2 | 多 frame 解压、非压缩 JSONL 兜底 |
-| **合计** | **78** | |
+| **合计** | **125** | |
 
 CI 会在 Node 22 与 Node 24 上跑同一套测试（`.github/workflows/test.yml`）。
 Node 22 的测试进程隔离开关仍叫 `--experimental-test-isolation`，所以那边执行 `npm run test:node22`。

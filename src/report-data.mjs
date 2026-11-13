@@ -1,6 +1,6 @@
 /** Machine-readable report builders: JSON and CSV. */
 import { isSubagentSession, projectionIsRunning, sortSessionRecords } from './activity.mjs';
-import { canonicalProvider, resolvePrice } from './pricing.mjs';
+import { canonicalProvider, DEFAULT_USD_LONG_CONTEXT_THRESHOLD, resolvePrice } from './pricing.mjs';
 import { averageTokenPrice, sortCostMicro } from './money.mjs';
 import { formatDay, localMidnight } from './time-range.mjs';
 import { attachBilling, realPricingCsv } from './billing-report.mjs';
@@ -386,8 +386,37 @@ export function buildTimeRangeDataset({ sessions, pricing, pageSize = 5, daily }
   };
 }
 
+/**
+ * JSON-safe provenance copy of the USD table for report consumers.
+ *
+ * Legacy reports (no USD document) keep `usdPricing: null`, so old reports
+ * and fixtures keep rendering exactly as before.
+ */
+function usdPricingRecord(usdPricing) {
+  if (usdPricing === null || usdPricing === undefined) return null;
+  const models = {};
+  for (const [id, price] of Object.entries(usdPricing.models)) {
+    models[id] = {
+      ...price,
+      source: price.source ?? 'legacy',
+      ...(price.long === undefined ? {} : { long: { ...price.long } }),
+    };
+  }
+  const providers = [...(usdPricing.providers ?? [])];
+  return {
+    currency: 'USD',
+    unitTokens: usdPricing.unitTokens,
+    longContextThreshold: usdPricing.longContextThreshold ?? DEFAULT_USD_LONG_CONTEXT_THRESHOLD,
+    providers,
+    canonicalProviders: [...new Set(providers.map((provider) => canonicalProvider(provider)))],
+    source: usdPricing.source === null || usdPricing.source === undefined ? null : { ...usdPricing.source },
+    models,
+    aliases: { ...usdPricing.aliases },
+  };
+}
+
 /** Build the complete report object emitted by `--format json`. */
-export function buildReport({ home, sources = [], pricing, results, generatedAt, billing, billingBounds }) {
+export function buildReport({ home, sources = [], pricing, usdPricing = null, results, generatedAt, billing, billingBounds }) {
   const sessions = results.map(sessionRecord);
   // Running main -> running subagent -> completed (cost/time order within each
   // bucket). buildReport is shared by the CLI, JSON/CSV output, and the live
@@ -440,6 +469,8 @@ export function buildReport({ home, sources = [], pricing, results, generatedAt,
       models: Object.fromEntries(Object.entries(pricing.models).map(([id, price]) => [id, { ...price }])),
       aliases: { ...pricing.aliases },
     },
+    // Separate currency, separate table: never merged into `pricing` (CNY).
+    usdPricing: usdPricingRecord(usdPricing),
     summary: {
       ...summary,
       costCny: round(summary.costMicroCny / 1e6),

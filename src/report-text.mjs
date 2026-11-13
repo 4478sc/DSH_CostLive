@@ -1,7 +1,7 @@
 /** Human-readable terminal reports. */
 import { activityLabel } from './activity.mjs';
 import { formatMoney } from './money.mjs';
-import { billedInputTokens, describePeakHours, formatCny, formatTokens } from './pricing.mjs';
+import { billedInputTokens, canonicalProvider, describePeakHours, formatCny, formatTokens } from './pricing.mjs';
 import { formatPercent, formatTime, renderTable, truncateDisplay } from './format.mjs';
 
 const alignList = ['l', 'l', 'l', 'l', 'r', 'r', 'r', 'r', 'r'];
@@ -218,8 +218,8 @@ export function verifyProjection(result) {
   return { ok, expected, actual };
 }
 
-/** Price-table report. */
-export function renderModels(pricing) {
+/** Price-table report (CNY table plus the separate USD table). */
+export function renderModels(pricing, usdPricing = null) {
   const lines = [`价格表（${pricing.currency} / ${pricing.unitTokens.toLocaleString('en-US')} tokens）`];
   const rows = Object.entries(pricing.models).map(([id, price]) => [
     id,
@@ -251,8 +251,32 @@ export function renderModels(pricing) {
     lines.push(`别名：${aliases.map(([from, to]) => `${from} → ${to}`).join('  ·  ')}`);
   }
   lines.push('');
-  lines.push('规则：未定价模型仍统计 token，但费用记为 0 并在列表中标注 *。');
+  lines.push('规则：未定价模型仍统计 token，但不产生金额、不计入均价（未定价 ≠ 免费），并在列表中标注 *。');
   lines.push('模型 id 匹配：忽略 provider 前缀与日期后缀；支持以 * 结尾的前缀通配。');
+  if (usdPricing !== null && usdPricing !== undefined) {
+    const threshold = usdPricing.longContextThreshold;
+    lines.push('');
+    lines.push(`USD 价格表（USD / ${usdPricing.unitTokens.toLocaleString('en-US')} tokens）`);
+    const usdRows = [];
+    for (const [id, price] of Object.entries(usdPricing.models)) {
+      const source = price.source === 'mirror' ? 'mirror' : 'legacy';
+      usdRows.push([id, '标准', String(price.input), String(price.output), String(price.cacheWrite), String(price.cacheRead), source]);
+      if (price.long !== undefined) {
+        usdRows.push([id, `> ${threshold.toLocaleString('en-US')}`, String(price.long.input), String(price.long.output), String(price.long.cacheWrite), String(price.long.cacheRead), source]);
+      }
+    }
+    lines.push(renderTable(['MODEL', 'TIER', 'INPUT', 'OUTPUT', 'CACHE-WRITE', 'CACHE-READ', 'SOURCE'], usdRows, ['l', 'l', 'r', 'r', 'r', 'r', 'l']));
+    const providers = [...new Set((usdPricing.providers ?? []).map((provider) => canonicalProvider(provider)))].join(' / ');
+    lines.push(`适用提供方：${providers}（同一 Codex 服务按提供方归一）`);
+    const legacy = Object.entries(usdPricing.models).filter(([, price]) => price.source !== 'mirror').map(([id]) => id);
+    if (legacy.length > 0) lines.push(`沿用旧价、未按本次公开源重新核实：${legacy.join(' · ')}`);
+    if (usdPricing.source !== null && usdPricing.source !== undefined) {
+      const source = usdPricing.source;
+      lines.push(`来源：${source.label ?? ''} · ${source.url ?? ''} · 更新 ${source.retrievedAt ?? ''}（公开页美元基准，不做换汇）`);
+    }
+    lines.push(`长档：单条请求的输入上下文（未缓存输入 + 缓存写 + 缓存读，不含输出）> ${threshold} tokens 时四个桶按长档价。`);
+    lines.push('未出现在本表的模型按未定价处理（不是免费）。');
+  }
   return lines.join('\n');
 }
 

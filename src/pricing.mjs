@@ -195,6 +195,9 @@ export function loadPricing(path = DEFAULT_PRICING_PATH) {
 /** USD list-price table for dollar-billed providers (e.g. `codex`). */
 export const DEFAULT_USD_PRICING_PATH = join(HERE, '..', 'config', 'usd-pricing.json');
 
+/** Default long-context boundary (prompt tokens per request), matching the published price sheet. */
+export const DEFAULT_USD_LONG_CONTEXT_THRESHOLD = 272000;
+
 /**
  * Validate a USD price document. Same four rates as the CNY table, quoted in
  * USD per `unitTokens` tokens (OpenAI list price), plus the providers whose
@@ -208,19 +211,49 @@ export function normalizeUsdPricing(raw) {
   if (!Number.isInteger(unitTokens) || unitTokens <= 0) {
     throw new Error('usd-pricing: unitTokens must be a positive integer');
   }
+  const longContextThreshold = raw.longContextThreshold ?? DEFAULT_USD_LONG_CONTEXT_THRESHOLD;
+  if (!Number.isInteger(longContextThreshold) || longContextThreshold <= 0) {
+    throw new Error('usd-pricing: longContextThreshold must be a positive integer');
+  }
   const providers = Array.isArray(raw.providers)
     ? raw.providers.map((provider) => String(provider).trim().toLowerCase()).filter((provider) => provider !== '')
     : [];
   const models = {};
   for (const [id, price] of Object.entries(raw.models ?? {})) {
-    models[id.toLowerCase()] = rateRecord(`usd models["${id}"]`, price);
+    const entry = rateRecord(`usd models["${id}"]`, price);
+    // Per-model provenance: "mirror" = read from the public price source on
+    // retrievedAt; "legacy" = kept from an earlier table and not re-verified.
+    const source = price.source ?? 'legacy';
+    if (source !== 'mirror' && source !== 'legacy') {
+      throw new Error(`usd-pricing: usd models["${id}"].source must be "mirror" or "legacy"`);
+    }
+    entry.source = source;
+    // A long-context tariff is a full four-rate record valid only above the
+    // document's threshold; a partial record would silently misprice a request.
+    if (price.long !== undefined) entry.long = rateRecord(`usd models["${id}"].long`, price.long);
+    models[id.toLowerCase()] = entry;
   }
   const aliases = {};
   for (const [from, to] of Object.entries(raw.aliases ?? {})) {
     if (typeof to !== 'string') throw new Error(`usd-pricing: aliases["${from}"] must be a model id string`);
     aliases[from.toLowerCase()] = to.toLowerCase();
   }
-  return { currency: 'USD', unitTokens, providers, models, aliases };
+  const source = usdSourceRecord(raw.source);
+  return { currency: 'USD', unitTokens, longContextThreshold, providers, source, models, aliases };
+}
+
+/** Normalized provenance block; absent source stays null (older documents keep working). */
+function usdSourceRecord(value) {
+  if (value === null || value === undefined || typeof value !== 'object' || Array.isArray(value)) return null;
+  const text = (key) => (typeof value[key] === 'string' && value[key].trim() !== '' ? value[key].trim() : null);
+  const source = {
+    label: text('label'),
+    url: text('url'),
+    api: text('api'),
+    retrievedAt: text('retrievedAt'),
+    note: text('note'),
+  };
+  return Object.values(source).some((field) => field !== null) ? source : null;
 }
 
 /** Load the USD table; a missing file means "no USD pricing", not an error. */
@@ -252,13 +285,43 @@ export function resolveUsdPrice(model, usdPricing) {
   return null;
 }
 
-/** Micro-USD for one bucket set under one USD rate record (same arithmetic as CNY). */
-export function costMicroUsd(buckets, price) {
+/**
+ * The context size a long-context tariff keys on: all prompt-side buckets of
+ * ONE billed sample (uncached input + cache write + cache read). Output tokens
+ * never count, and a session-level total is not used: the provider bills each
+ * request by its own input size.
+ */
+export function usdContextTokens(buckets) {
+  const value = buckets ?? {};
+  return (value.uncachedInputTokens ?? 0) + (value.cacheWriteTokens ?? 0) + (value.cacheReadTokens ?? 0);
+}
+
+/**
+ * Tier of one USD sample: 'long' above the document threshold, 'standard'
+ * otherwise, and null for models without a long-context tariff.
+ */
+export function usdTierOf(buckets, price, threshold = DEFAULT_USD_LONG_CONTEXT_THRESHOLD) {
+  if (price === null || price === undefined || price.long === undefined) return null;
+  return usdContextTokens(buckets) > threshold ? 'long' : 'standard';
+}
+
+/** The four rates that apply to one USD sample (base or long-context). */
+export function usdRateAt(buckets, price, threshold = DEFAULT_USD_LONG_CONTEXT_THRESHOLD) {
+  return usdTierOf(buckets, price, threshold) === 'long' ? price.long : price;
+}
+
+/**
+ * Micro-USD for one bucket set under one USD rate record (same arithmetic as
+ * CNY). When the price has a long-context tier, the sample's own prompt size
+ * selects it; callers pass the threshold from the price document.
+ */
+export function costMicroUsd(buckets, price, threshold = DEFAULT_USD_LONG_CONTEXT_THRESHOLD) {
+  const rate = usdRateAt(buckets, price, threshold);
   return Math.round(
-    buckets.uncachedInputTokens * price.input +
-      buckets.outputTokens * price.output +
-      buckets.cacheWriteTokens * price.cacheWrite +
-      buckets.cacheReadTokens * price.cacheRead,
+    buckets.uncachedInputTokens * rate.input +
+      buckets.outputTokens * rate.output +
+      buckets.cacheWriteTokens * rate.cacheWrite +
+      buckets.cacheReadTokens * rate.cacheRead,
   );
 }
 

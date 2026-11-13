@@ -239,6 +239,7 @@ export function collectLiveReport(options = {}) {
     home: sources[0].home,
     sources: sourceStats,
     pricing,
+    usdPricing,
     results: filtered,
     generatedAt: Date.now(),
     billing,

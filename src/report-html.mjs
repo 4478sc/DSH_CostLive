@@ -35,7 +35,14 @@ function money(cnyMicro, usdMicro) {
  */
 function modelCostText(model, tr) {
   if (model.priceKey === 'opencode-pending') return tr('cost.pending');
+  // Unpriced is the single cross-surface label: the browser runtime recomputes
+  // rows with the same message, so the server must not use a second wording.
   return model.priced ? money(model.costMicroCny, model.costMicroUsd) : tr('cost.unpriced');
+}
+
+/** "$2.5" for one USD rate per 1M tokens, without inventing decimals. */
+function usdRate(value) {
+  return value === null || value === undefined ? '—' : '$' + String(value);
 }
 
 /**
@@ -161,6 +168,13 @@ export function renderHtml(report, options = {}) {
   const datasetJson = JSON.stringify(buildReportDataset(report)).replace(/</gu, '\\u003c');
   const rangeNote = tr('range.note.all', { count: sessions.length });
 
+  // The USD table is a separate currency, never merged into the CNY one.
+  // Absent metadata (legacy reports/fixtures) simply renders no USD section.
+  const usd = report.usdPricing !== null && typeof report.usdPricing === 'object' ? report.usdPricing : null;
+  const usdThreshold = usd?.longContextThreshold ?? 272000;
+  const usdCanonical = new Set(Array.isArray(usd?.canonicalProviders) ? usd.canonicalProviders : []);
+  const usdProviders = [...usdCanonical].join(' / ');
+
   const priceRows = Object.entries(pricing.models)
     .map(
       ([id, price]) => `<tr>
@@ -192,6 +206,33 @@ export function renderHtml(report, options = {}) {
       )}</div>`;
     })
     .join('');
+
+  // One row per model and tier: standard rates up to the threshold, the
+  // long-context tariff above it. The source column keeps mirrored rows apart
+  // from legacy (not re-verified) rows instead of claiming one provenance.
+  const usdPriceRows =
+    usd === null
+      ? ''
+      : Object.entries(usd.models ?? {})
+          .map(([id, price]) => {
+            const sourceText = tr(price.source === 'mirror' ? 'priceUsd.source.mirror' : 'priceUsd.source.legacy');
+            const row = (tier, rate) => `<tr>
+        <td class="mono">${escapeHtml(id)}</td>
+        <td>${escapeHtml(tier)}</td>
+        <td class="num">${usdRate(rate.input)}</td>
+        <td class="num">${usdRate(rate.output)}</td>
+        <td class="num">${usdRate(rate.cacheWrite)}</td>
+        <td class="num">${usdRate(rate.cacheRead)}</td>
+        <td class="muted">${escapeHtml(sourceText)}</td>
+      </tr>`;
+            const rows = [row(tr('tier.standard'), price)];
+            if (price.long !== undefined && price.long !== null) rows.push(row(tr('tier.long', { tokens: formatTokens(usdThreshold) }), price.long));
+            return rows.join('');
+          })
+          .join('');
+
+  const usdSource = usd === null || usd.source === null || typeof usd.source !== 'object' ? null : usd.source;
+  const usdLegacy = usd === null ? [] : Object.entries(usd.models ?? {}).filter(([, price]) => price.source !== 'mirror').map(([id]) => id);
 
   const modelRows = models
     .map(
@@ -651,6 +692,20 @@ ${BILLING_CSS}
     ${tariffNotes}
     <div class="note">${tr('section.price.note')}</div>
   </section>
+
+  ${usd === null ? '' : `<section id="usd-pricing">
+    <h2>${escapeHtml(tr('section.priceUsd', { tokens: formatTokens(usd.unitTokens) }))}</h2>
+    <div class="note">${escapeHtml(tr('section.priceUsd.providers', { providers: usdProviders }))}</div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>${tr('table.model')}</th><th>${tr('table.tier')}</th><th class="num">${tr('table.input')}</th><th class="num">${tr('table.output')}</th><th class="num">${tr('table.cacheWrite')}</th><th class="num">${tr('table.cacheRead')}</th><th>${tr('table.source')}</th></tr></thead>
+        <tbody>${usdPriceRows}</tbody>
+      </table>
+    </div>
+    <div class="note">${escapeHtml(tr('section.priceUsd.threshold', { tokens: formatTokens(usdThreshold) }))}</div>
+    ${usdLegacy.length === 0 ? '' : `<div class="note">${escapeHtml(tr('section.priceUsd.legacy', { models: usdLegacy.join(', ') }))}</div>`}
+    ${usdSource === null ? '' : `<div class="note">${escapeHtml(tr('section.priceUsd.source', { label: usdSource.label ?? '', url: usdSource.url ?? '', retrievedAt: usdSource.retrievedAt ?? '' }))}</div>`}
+  </section>`}
 
   </div>
   <div id="real-pricing-content">${real ? realBody(real, locale) : ''}</div>

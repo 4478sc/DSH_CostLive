@@ -154,6 +154,9 @@ opencode.ai console ──VM polls every 60 s──▶ ~/.opencode-usage/request
 - Autostart and self-healing: the VM uses cron (`@reboot` plus a 2-minute watchdog) — if `/api/health` fails it
   restarts the server, and if the archive's `lastSyncAt` is older than 15 minutes it restarts the sync loop;
   the host registers its push loop as a logon task (or you just double-click the launcher).
+- Nothing on the host shows a window: the task action is `wscript.exe //nologo //B "<repo>\tools\launch-hidden.vbs" "<repo>\tools\ensure-host-sync.ps1"`,
+  and every console child inside the scripts goes through the CREATE_NO_WINDOW launcher in `tools\hidden-launch.ps1`.
+  Root cause, rollback and regression tests: [docs/host-sync-windowless.md](docs/host-sync-windowless.md).
 - The sync loop's `fetch` has a 30 s timeout, and the lock file is validated through `/proc/<pid>/cmdline` so
   "process alive but idle" and "pid reused after a restart" cannot wedge it.
 
@@ -244,6 +247,14 @@ the local estimate only as a backup:
 - **Official cache saving in USD**: `usdRates` in `config/official.json` (USD per 1M tokens fitted to the official
   bill) is used only for "how much the cache saved": `cacheReadTokens × (input − cacheRead)`. A missing model
   scores 0; the CNY table is never applied to official sessions.
+- **A refused credential is explained**: the sync separates 401 / 403 / 429 / 5xx and stores the latest failure in
+  the archive's `state.json` (`lastError`). When the archive is stale the page names the permission problem (scope and
+  workspace) instead of the generic "the sync loop may have stopped", and the loop backs off to five minutes on
+  401/403 instead of retrying every minute. A 403 means this key lacks the permission or scope to read usage (the
+  workspace it is bound to matters too): **a key with enough permission does read it**, so check with `--check-auth`
+  before replacing the credential instead of assuming no key can read. A server-side watchdog can read the same
+  `lastError`: skip restarting a refused sync loop while a 401/403 is younger than 30 minutes (`vm/ensure.sh` does
+  exactly that) instead of restarting it every two minutes.
 - **Config** `config/official.json`: `store` (archive directory), `providers`, and `credentials`
   (`OPENCODE_GO_API_KEY` from `~/.dsh/.credentials.yaml` by default; an environment variable of the same name wins).
 
@@ -251,6 +262,7 @@ the local estimate only as a backup:
 node tools\opencode-sync.mjs --stats     # archive overview: rows, sessions, time range, USD total
 node tools\opencode-sync.mjs             # one incremental sync
 node tools\opencode-sync.mjs --loop      # sync every 60 s; dsh-cost-live.cmd starts it automatically
+node tools\opencode-sync.mjs --check-auth # ask the console one question: may this key read usage? (writes nothing)
 node bin\dsh-cost.mjs --no-official      # ignore the archive for a run (opencode stays "pending", never CNY)
 ```
 
@@ -263,8 +275,14 @@ comes back within one period; an archive that has not moved for 10 minutes gets 
 
 ```bat
 schtasks /Create /TN DSH_CostLive_SyncKeepAlive /SC MINUTE /MO 5 /F ^
-  /TR "powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File <repo>\tools\ensure-host-sync.ps1"
+  /TR "wscript.exe //nologo //B ""<repo>\tools\launch-hidden.vbs"" ""<repo>\tools\ensure-host-sync.ps1"""
 ```
+
+Do **not** schedule `powershell.exe -WindowStyle Hidden` directly: it still creates a console, which shows up as a
+window when Windows Terminal is the default terminal. Task actions go through `launch-hidden.vbs` (wscript host), and
+every console child the scripts start goes through the repo's own `tools\hidden-launch.ps1` launcher, so a deployment
+does not have to add files of its own. Deployment, rollback and regression tests:
+[docs/host-sync-windowless.md](docs/host-sync-windowless.md).
 
 ---
 
@@ -448,10 +466,12 @@ DSH_CostLive/
 │  ├─ live.mjs                # live document / fragment / atomic write
 │  ├─ live-server.mjs         # local HTTP server and the three APIs
 │  └─ live-client.js          # browser side: polling, folding, ranges, scroll restore
-├─ test/                      # node:test, 9 files, 64 cases
+├─ test/                      # node:test, 12 files, 112 cases + the Windows regression test
 ├─ tools/make-demo-home.mjs   # synthetic demo data generator
 ├─ tools/sync-vm-dsh.ps1      # incremental ~/.dsh → .dsh-vm sync from a VMware VM
 ├─ tools/vm-sync-snapshot.sh  # VM-side incremental packer
+├─ tools/hidden-launch.ps1    # windowless launcher (CREATE_NO_WINDOW), mutex probe, retry ramp
+├─ tools/launch-hidden.vbs    # console-free scheduled-task entry point (wscript)
 ├─ docs/                      # architecture, DSH token accounting research, development notes
 ├─ assets/preview*.png        # screenshots (session view / by-day view, demo data)
 ├─ LIVE.md                    # complete live-dashboard guide
@@ -474,19 +494,26 @@ npm test
 | File | Cases | Coverage |
 |---|---:|---|
 | `pricing.test.mjs` | 11 | Table normalization, aliases, wildcards, peak tiers, micro-CNY precision, built-in table parity |
-| `engine.test.mjs` | 9 | Streaming replacement, retries, four-bucket merge, zero usage, model switches, opencode pending |
-| `activity.test.mjs` | 7 | `openStep` authority, `turnBoundary` fallback, dual-channel subagent detection, stable three-bucket ordering |
-| `time-range.test.mjs` | 18 | Range boundaries, missing dates, aggregation arithmetic, browser runtime, DOM events, storage fallbacks, HTML integration |
-| `daily.test.mjs` | 7 | Midnight split, unknown-time bucket, calendar boundaries, daily de-duplication, by-day DOM and storage |
+| `engine.test.mjs` | 15 | Streaming replacement, retries, four-bucket merge, zero usage, model switches, opencode pending |
+| `activity.test.mjs` | 8 | `openStep` authority, `turnBoundary` fallback, dual-channel subagent detection, stable three-bucket ordering |
+| `time-range.test.mjs` | 22 | Range boundaries, missing dates, aggregation arithmetic, browser runtime, DOM events, storage fallbacks, HTML integration |
+| `daily.test.mjs` | 11 | Midnight split, unknown-time bucket, calendar boundaries, daily de-duplication, by-day DOM and storage |
+| `billing.test.mjs` | 10 | Subscription amortization, natural-month day counts, effective-date changes, shared providers, idle costs, settings API |
 | `live.test.mjs` | 6 | Collection/filtering, template splitting, atomic writes, HTTP API |
-| `opencode-usage.test.mjs` | 13 | Official row normalization, de-duplication, session overlay, window totals, cache saving |
+| `opencode-usage.test.mjs` | 17 | Official row normalization, de-duplication, session overlay, window totals, cache saving, 401/403 hints, `--check-auth` |
+| `i18n.test.mjs` | 5 | Locale tags, placeholder substitution, identical key sets and placeholders per locale |
 | `sources.test.mjs` | 3 | Multi-source parsing, host+VM merge, degraded missing source |
 | `sessions.test.mjs` | 2 | Session discovery and reading |
 | `zstd.test.mjs` | 2 | Multi-frame decompression, plain JSONL fallback |
-| **Total** | **78** | |
+| **Total (`npm test`)** | **112** | |
 
-CI runs the same suite on Node 22 and Node 24 (`.github/workflows/test.yml`). Node 22 still calls the test
-isolation switch `--experimental-test-isolation`, so that job uses `npm run test:node22`.
+`npm run test:ps` adds 45 Windows-targeted regression cases: windowless start (GUI host + CREATE_NO_WINDOW),
+argument quoting with spaces and quotes, the single-instance mutex, the offline retry ramp, the VBS entry point and
+the missing-helper error text. See [docs/host-sync-windowless.md](docs/host-sync-windowless.md).
+
+CI runs the same suite on Node 22 and Node 24 and the PowerShell regression test on `windows-latest`
+(`.github/workflows/test.yml`). Node 22 still calls the test isolation switch `--experimental-test-isolation`,
+so that job uses `npm run test:node22`.
 
 ---
 
@@ -526,6 +553,7 @@ isolation switch `--experimental-test-isolation`, so that job uses `npm run test
 | 0 sessions | Check that `--home` / `$DSH_HOME` / `~/.dsh/sessions` contains `session.v4.jsonl.zstd` files |
 | Amounts differ from DSH | Run `node bin/dsh-cost.mjs --verify`; a running session's projection may lag, retry later |
 | Peak price not applied | Use `--since` to check whether the samples fall inside a weekday peak window; 12:00 and 18:00 sharp are already off-peak |
+| Official usage says "rejected by the console (HTTP 403)" | Run `node tools\opencode-sync.mjs --check-auth` first, then check the key's scope and workspace under Account › Personal API keys. A key with enough permission reads it fine; the archive keeps the last successful snapshot and retrying does not heal it |
 
 More troubleshooting in [`LIVE.md`](LIVE.md).
 
@@ -539,6 +567,7 @@ More troubleshooting in [`LIVE.md`](LIVE.md).
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Data flow, module responsibilities, invariants, extension points |
 | [`docs/DSH-TOKEN-ACCOUNTING.md`](docs/DSH-TOKEN-ACCOUNTING.md) | How DSH counts tokens (events, projections, replacement/retry rules) |
 | [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) | Development notes: pitfalls, debugging commands, acceptance checklist, ideas |
+| [`docs/host-sync-windowless.md`](docs/host-sync-windowless.md) | Windowless host→VM sync chain: root cause, call chain, task wiring, rollback, regression tests, measured evidence |
 
 ---
 

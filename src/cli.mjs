@@ -326,13 +326,15 @@ export function main(argv = process.argv.slice(2)) {
           usdRates: officialReport.config.usdRates ?? {},
           tierOf,
         });
+        const officialState = loadOfficialState(officialReport.config.store);
         official = {
           store: officialReport.config.store,
           requests: officialReport.summary.requests,
           sessions: stats.applied,
           skippedMixed: stats.skippedMixed,
           windows: officialWindowTotals(officialReport.records),
-          storeUpdatedAt: loadOfficialState(officialReport.config.store)?.lastSyncAt ?? null,
+          storeUpdatedAt: officialState?.lastSyncAt ?? null,
+          syncError: officialState?.lastError ?? null,
         };
       }
     } catch (error) {

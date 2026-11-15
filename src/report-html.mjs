@@ -346,6 +346,15 @@ export function renderHtml(report, options = {}) {
         ? tr('note.storeAge.justNow')
         : tr('note.storeAge.minutes', { count: storeAgeMinutes });
   const staleStore = storeAgeMinutes !== null && storeAgeMinutes >= 5;
+  // A stale archive has a cause: name it when the sync recorded one, instead of
+  // always blaming a stopped loop.
+  const syncError = report.official?.syncError ?? null;
+  const staleReason =
+    syncError !== null && syncError.kind === 'forbidden'
+      ? tr('note.console.authForbidden', { status: syncError.status ?? 403 })
+      : syncError !== null && syncError.kind === 'unauthorized'
+        ? tr('note.console.authMissing')
+        : tr('note.console.stale');
   const consoleNote =
     officialWindows !== null
       ? `<div class="note${staleStore ? ' warn' : ''}">${tr('note.console', {
@@ -353,7 +362,7 @@ export function renderHtml(report, options = {}) {
           seven: formatUsd(officialWindows['7d']),
           thirty: formatUsd(officialWindows['30d']),
           age: storeAgeText,
-          stale: staleStore ? tr('note.console.stale') : '',
+          stale: staleStore ? staleReason : '',
         })}</div>`
       : '';
   const pendingCount = sessions.filter((session) => session.officialPending === true).length;

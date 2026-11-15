@@ -8,6 +8,7 @@
  *
  *   node tools/opencode-sync.mjs [--config config/official.json] [--loop]
  *                                [--interval 60] [--full] [--stats] [--dry-run]
+ *                                [--check-auth]
  *
  * Auth: `OPENCODE_GO_API_KEY` from the environment or from the DSH credential
  * store (`~/.dsh/.credentials.yaml`, `refs:` section).
@@ -19,6 +20,7 @@ import {
   loadOfficialConfig,
   loadOfficialStore,
   mergeOfficialRecords,
+  describeSyncFailure,
   normalizeLogItem,
   readApiKey,
   summarizeStore,
@@ -28,6 +30,18 @@ const HERE = dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/u
 const DEFAULT_CONFIG = resolve(HERE, '..', 'config', 'official.json');
 const PAGE_LIMIT = 100;
 const MAX_PAGES = 2000;
+
+/** How long the loop waits before the next attempt (see nextSyncDelay). */
+const AUTH_RETRY_MS = 5 * 60 * 1000;
+
+/** 401/403 from the console: terminal, so the loop must not hammer it. */
+export class SyncAuthError extends Error {
+  constructor(failure) {
+    super(`HTTP ${failure.status}${failure.tag ? ` ${failure.tag}` : ''}: ${failure.hint}`);
+    this.name = 'SyncAuthError';
+    this.failure = failure;
+  }
+}
 
 /**
  * One writer per store: a second loop (or a manual run next to the dashboard's
@@ -74,18 +88,38 @@ function acquireStoreLock(store) {
   return { ok: true, pid: process.pid, file, release };
 }
 
+/**
+ * Next wait between sync attempts. A 401/403 is terminal for this credential, so
+ * the loop backs off to at least five minutes instead of retrying every interval;
+ * transient failures (429/5xx/network) keep the configured interval. Pure, so the
+ * regression test can assert it without waiting.
+ */
+export function nextSyncDelay(intervalMs, failure) {
+  const terminal = failure?.kind === 'forbidden' || failure?.kind === 'unauthorized';
+  return terminal ? Math.max(intervalMs, AUTH_RETRY_MS) : intervalMs;
+}
+
 function sleep(ms) {
   return new Promise((done) => setTimeout(done, ms));
 }
 
 /** One page of inference rows, newest first. */
-export async function fetchPage(config, key, { since = 0, cursor = null, limit = PAGE_LIMIT } = {}) {
+export function requestLogsUrl(config, { since = 0, cursor = null, limit = PAGE_LIMIT } = {}) {
   const url = new URL(`${config.apiBase.replace(/\/$/u, '')}/request-logs`);
   url.searchParams.set('category', 'inference');
   url.searchParams.set('limit', String(limit));
   if (since > 0) url.searchParams.set('since', String(since));
   if (cursor !== null) url.searchParams.set('cursor', cursor);
   if (config.product) url.searchParams.set('product', String(config.product));
+  return url;
+}
+
+/**
+ * Read one page. 401/403 become a SyncAuthError: the body is a short tag such
+ * as `{"_tag":"Forbidden"}`, and the actionable part is the hint, not the body.
+ */
+export async function fetchPage(config, key, { since = 0, cursor = null, limit = PAGE_LIMIT } = {}) {
+  const url = requestLogsUrl(config, { since, cursor, limit });
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const response = await fetch(url, {
       headers: { authorization: `Bearer ${key}`, accept: 'application/json' },
@@ -99,11 +133,38 @@ export async function fetchPage(config, key, { since = 0, cursor = null, limit =
     }
     if (!response.ok) {
       const body = await response.text();
+      const failure = describeSyncFailure(response.status, body);
+      if (failure.kind === 'unauthorized' || failure.kind === 'forbidden') throw new SyncAuthError(failure);
       throw new Error(`HTTP ${response.status}: ${body.slice(0, 200)}`);
     }
     return await response.json();
   }
   throw new Error('request-logs: retries exhausted');
+}
+
+/**
+ * Ask the console one cheap question and report which layer rejects the key.
+ * Prints nothing secret and never touches the archive.
+ */
+export async function checkAuth(config, { log = console.log } = {}) {
+  const key = readApiKey(config);
+  if (key === null) {
+    log(`[opencode] no OPENCODE_GO_API_KEY (env or ${config.credentials})`);
+    return 4;
+  }
+  const response = await fetch(requestLogsUrl(config, { limit: 1 }), {
+    headers: { authorization: `Bearer ${key}`, accept: 'application/json' },
+    signal: AbortSignal.timeout(20_000),
+  });
+  const body = await response.text();
+  if (response.ok) {
+    log(`[opencode] auth ok: request-logs HTTP 200 (${config.apiBase})`);
+    return 0;
+  }
+  const failure = describeSyncFailure(response.status, body);
+  log(`[opencode] auth failed: request-logs HTTP ${failure.status} (${failure.kind}${failure.tag ? ` ${failure.tag}` : ''})`);
+  log(`[opencode] ${failure.hint}`);
+  return failure.kind === 'forbidden' ? 3 : 4;
 }
 
 /**
@@ -125,7 +186,8 @@ export async function fetchConsoleTotals(config, key) {
         continue;
       }
       if (!response.ok) {
-        console.log(`[opencode] ${path} -> HTTP ${response.status}`);
+        const failure = describeSyncFailure(response.status, await response.text());
+        console.log(`[opencode] ${path} -> HTTP ${failure.status} (${failure.kind}${failure.tag ? ` ${failure.tag}` : ''})`);
         return null;
       }
       return response.json();
@@ -166,6 +228,28 @@ function readState(store) {
 
 function writeState(store, state) {
   writeFileSync(`${store}/state.json`, `${JSON.stringify(state, null, 2)}\n`, 'utf8');
+}
+
+/**
+ * Keep the last failure next to the archive so the page can explain a stale
+ * number instead of only saying "the loop may have stopped". Diagnostics must
+ * never break the loop, hence the swallow.
+ */
+function recordFailure(store, error) {
+  try {
+    const state = readState(store);
+    const failure = error?.failure ?? null;
+    state.lastError = {
+      at: Date.now(),
+      status: failure?.status ?? null,
+      kind: failure?.kind ?? 'network',
+      tag: failure?.tag ?? null,
+      message: String(error instanceof Error ? error.message : error).slice(0, 300),
+    };
+    writeState(store, state);
+  } catch {
+    /* a broken state file is not worth stopping the sync for */
+  }
 }
 
 /**
@@ -235,13 +319,14 @@ export async function syncOnce(config, { full = false, dryRun = false, log = con
 }
 
 function parseArgs(argv) {
-  const options = { loop: false, full: false, stats: false, dryRun: false, interval: 60, config: DEFAULT_CONFIG };
+  const options = { loop: false, full: false, stats: false, dryRun: false, checkAuth: false, interval: 60, config: DEFAULT_CONFIG };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === '--loop') options.loop = true;
     else if (arg === '--full') options.full = true;
     else if (arg === '--stats') options.stats = true;
     else if (arg === '--dry-run') options.dryRun = true;
+    else if (arg === '--check-auth') options.checkAuth = true;
     else if (arg === '--config') options.config = argv[++index];
     else if (arg === '--interval') options.interval = Number(argv[++index]);
     else if (arg === '--help' || arg === '-h') options.help = true;
@@ -259,7 +344,7 @@ async function main() {
     return 2;
   }
   if (options.help) {
-    process.stdout.write('usage: opencode-sync.mjs [--config <file>] [--loop] [--interval 60] [--full] [--stats] [--dry-run]\n');
+    process.stdout.write('usage: opencode-sync.mjs [--config <file>] [--loop] [--interval 60] [--full] [--stats] [--dry-run] [--check-auth]\n');
     return 0;
   }
   const config = loadOfficialConfig(options.config);
@@ -271,6 +356,7 @@ async function main() {
     process.stdout.write('[opencode] disabled in official.json\n');
     return 0;
   }
+  if (options.checkAuth) return checkAuth(config);
   if (options.stats) {
     const store = loadOfficialStore(config.store);
     const summary = summarizeStore(store.records);
@@ -292,13 +378,25 @@ async function main() {
     process.stdout.write(`[opencode] another sync is already running (pid ${lock.pid}); exiting\n`);
     return 0;
   }
+  // One line per state change: a rejected credential used to print every
+  // minute, which buries the first (and only useful) line.
+  let previousKind = null;
   for (;;) {
+    let failure = null;
     try {
       await syncOnce(config, {});
+      previousKind = null;
     } catch (error) {
-      process.stderr.write(`[opencode] sync failed: ${error instanceof Error ? error.message : error}\n`);
+      failure = error?.failure ?? null;
+      const kind = failure?.kind ?? 'error';
+      if (kind !== previousKind) {
+        process.stderr.write(`[opencode] sync failed: ${error instanceof Error ? error.message : error}\n`);
+      }
+      previousKind = kind;
+      recordFailure(config.store, error);
     }
-    await sleep(intervalMs);
+    // A key the console refuses is not going to start working next minute.
+    await sleep(nextSyncDelay(intervalMs, failure));
   }
 }
 

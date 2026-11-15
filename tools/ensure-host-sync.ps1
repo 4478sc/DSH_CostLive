@@ -14,9 +14,19 @@ if ([string]::IsNullOrWhiteSpace($Repo)) { $Repo = Split-Path -Parent $PSScriptR
 $Repo = [IO.Path]::GetFullPath($Repo)
 
 # VM-backed deployment: keep the forward and host uploader alive; no local accounting.
+# This is the single supervisor entry the scheduled tasks call: it never starts a
+# second uploader by itself (vm-dashboard.ps1 probes the loop's mutex first).
 if (Test-Path (Join-Path $Repo 'config/vm-dashboard.local.json')) {
-  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'vm-dashboard.ps1') -Ensure
-  exit $LASTEXITCODE
+  $dashboard = Join-Path $PSScriptRoot 'vm-dashboard.ps1'
+  # Windowless: the launcher helper ships with the repo, so no deployment has to
+  # add a file of its own and no absolute path is required. A missing helper is a
+  # broken install, not a reason to fall back to a console window: say so and stop.
+  $helper = Join-Path $PSScriptRoot 'hidden-launch.ps1'
+  if (-not (Test-Path $helper)) { throw ('Missing windowless launcher helper: ' + $helper) }
+  . $helper
+  $run = Start-HiddenPowerShell -ScriptPath $dashboard -ArgumentList @('-Ensure') -Wait
+  if ($null -eq $run.ExitCode) { exit 1 }
+  exit ([int]$run.ExitCode)
 }
 
 $startSync = Join-Path $PSScriptRoot 'start-sync.ps1'

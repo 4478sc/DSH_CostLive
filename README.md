@@ -146,6 +146,9 @@ opencode.ai 控制台 ──虚拟机每 60 s 拉取──▶ ~/.opencode-usage/
 - 访问地址：虚拟机内 `http://127.0.0.1:4173/`，宿主机 `http://<vm-ip>:4173/`（仅在私有网段可达）。
 - 自启与自愈：虚拟机用 cron（`@reboot` + 每 2 分钟看护）——`/api/health` 不通就重启服务，
   归档 `lastSyncAt` 超过 15 分钟就强制重启同步循环；宿主机把推送循环注册成登录任务（或手动双击启动器）。
+- 宿主机侧全程无窗口：计划任务动作写成 `wscript.exe //nologo //B "<repo>\tools\launch-hidden.vbs" "<repo>\tools\ensure-host-sync.ps1"`，
+  脚本内部再起控制台子进程一律走 `tools\hidden-launch.ps1` 的 CREATE_NO_WINDOW 启动器。根因、回滚与回归测试见
+  [docs/host-sync-windowless.md](docs/host-sync-windowless.md)。
 - 同步循环的 `fetch` 带 30 秒超时，锁文件用 `/proc/<pid>/cmdline` 确认持有者真的是同步进程，
   避免「进程还在但不干活」和「重启后 pid 复用把循环挡住」两种假死。
 
@@ -214,6 +217,12 @@ opencode.ai 控制台 ──虚拟机每 60 s 拉取──▶ ~/.opencode-usage/
 - **两套货币，互不折算**：官方费用保留 USD（`costMicroUsd`），本地价表仍是 CNY；会话、模型、每日、总计都同时带两列，显示成 `￥N1+$N2`，合计也只相加同币种。仅排序时用一个固定常数把两者放在同一队列（`SORT_USD_TO_CNY`，不参与任何求和）。
 - **官网口径对照**：同步时顺带记录控制台的 `/usage/cost-by-day`（按 UTC 日），页面会显示「官网口径（UTC 日）：今天 / 7 天 / 30 天」。面板自身按**本机时区**切日，与官网窗口相差 8 小时，7 天这种短窗口差额最明显——对照这两行数字就能解释差异。
 - **官方缓存节省按 USD 计**：`config/official.json` 的 `usdRates`（每 1M token 的 USD 单价，用官方账单拟合）只用来算“缓存省了多少”：`cacheReadTokens × (input − cacheRead)`。缺该模型就记 0，不会拿 CNY 价表去套官方会话。
+- **凭据被拒时说明原因**：同步把 401 / 403 / 429 / 5xx 分开处理，并把最近一次失败写进归档目录的 `state.json`（`lastError`）；
+  归档过期时页面直接显示「凭据缺少读取权限（检查 scope 与工作区）」，而不是笼统的「同步循环可能已停止」；循环对 401/403
+  退避到 5 分钟，不每分钟重试。403 表示这个 key 的权限或作用域不够读取用量（也与它绑定的工作区有关）：
+  **权限足够的 key 可以正常读取**，先用 `--check-auth` 复核再决定是否更换，不要假定所有 key 都无法读取。
+  服务端看护脚本也可以读同一个 `lastError`：401/403 的 30 分钟内跳过重启被拒的同步循环（`vm/ensure.sh` 就是这样做的），
+  避免每 2 分钟重启一次。
 - **配置** `config/official.json`：`store`（归档目录）、`providers`、
   `credentials`（默认读 `~/.dsh/.credentials.yaml` 的 `OPENCODE_GO_API_KEY`，同名环境变量优先）。
 
@@ -221,6 +230,7 @@ opencode.ai 控制台 ──虚拟机每 60 s 拉取──▶ ~/.opencode-usage/
 node tools\opencode-sync.mjs --stats     # 归档概况：条数、会话数、时间范围、USD 合计
 node tools\opencode-sync.mjs             # 增量同步一次
 node tools\opencode-sync.mjs --loop      # 每 60 秒同步；dsh-cost-live.cmd 会自动拉起
+node tools\opencode-sync.mjs --check-auth # 只问控制台一句：这个 key 能不能读用量（不写归档）
 node bin\dsh-cost.mjs --no-official      # 临时不看官方归档（opencode 会话仍待官网，不回退 CNY）
 ```
 
@@ -232,8 +242,13 @@ node bin\dsh-cost.mjs --no-official      # 临时不看官方归档（opencode �
 
 ```bat
 schtasks /Create /TN DSH_CostLive_SyncKeepAlive /SC MINUTE /MO 5 /F ^
-  /TR "powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File <repo>\tools\ensure-host-sync.ps1"
+  /TR "wscript.exe //nologo //B ""<repo>\tools\launch-hidden.vbs"" ""<repo>\tools\ensure-host-sync.ps1"""
 ```
+
+计划任务**不要**直接运行 `powershell.exe -WindowStyle Hidden`：那仍会创建控制台，在 Windows Terminal 作为默认终端时
+就是用户看到的弹窗。任务动作统一经 `launch-hidden.vbs`（wscript 宿主）进入，脚本内部再起子进程一律走仓库自带的
+`tools\hidden-launch.ps1` 启动器，部署目录里不需要额外放这些文件。部署、回滚与回归测试见
+[docs/host-sync-windowless.md](docs/host-sync-windowless.md)。
 
 ---
 
@@ -401,14 +416,16 @@ DSH_CostLive/
 │  ├─ live.mjs                # 实时页文档 / 片段 / 原子写入
 │  ├─ live-server.mjs         # 本地 HTTP 服务与三个 API
 │  └─ live-client.js          # 浏览器端：轮询、折叠、范围、滚动恢复
-├─ test/                      # node:test，9 个文件 64 项
+├─ test/                      # node:test 12 个文件 112 项 + Windows 回归测试
 ├─ tools/make-demo-home.mjs   # 合成演示数据生成器
 ├─ tools/sync-vm-dsh.ps1      # 从 VMware VM 增量同步 ~/.dsh 到 .dsh-vm
 ├─ tools/vm-sync-snapshot.sh  # VM 端增量打包脚本
+├─ tools/hidden-launch.ps1    # 无窗口启动器（CREATE_NO_WINDOW）、mutex 探测、退避计算
+├─ tools/launch-hidden.vbs    # 计划任务用的无控制台入口（wscript）
 ├─ docs/                      # 架构、DSH token 口径调研、开发笔记
 ├─ assets/preview*.png        # 截图（会话视图 / 按天视图，演示数据）
 ├─ LIVE.md                    # 实时面板完整使用说明
-├─ tools/start-vm-sync.ps1    # 面板启动器调用的同步守护（pid 锁 + 心跳去重）
+├─ tools/start-sync.ps1       # 面板启动器调用的同步守护（pid 锁 + 心跳去重）
 ├─ dsh-cost-live.cmd          # Windows 启动器：HTTP 服务（主机 + VM），并拉起同步
 ├─ dsh-cost-vm-sync.cmd       # Windows 启动器：持续同步 VM 数据
 └─ dsh-cost-live-watch.cmd    # Windows 启动器：后台重建 HTML
@@ -427,18 +444,23 @@ npm test
 | 文件 | 项数 | 覆盖 |
 |---|---:|---|
 | `pricing.test.mjs` | 11 | 价格归一、别名、通配、峰谷判定、micro-CNY 精度、内置表一致性 |
-| `engine.test.mjs` | 9 | 流式样本替换、重试、四桶归并、零用量、模型切换、opencode 待官网 |
-| `activity.test.mjs` | 7 | `openStep` 权威性、`turnBoundary` 回退、子代理双通道识别、三桶稳定排序 |
-| `time-range.test.mjs` | 18 | 四档边界、缺失日期、聚合算术、浏览器运行时、DOM 事件、存储容错、HTML 集成 |
-| `daily.test.mjs` | 7 | 跨午夜拆分、未知时间桶、自然日边界、按天聚合去重、按天视图 DOM/存储 |
+| `engine.test.mjs` | 15 | 流式样本替换、重试、四桶归并、零用量、模型切换、opencode 待官网 |
+| `activity.test.mjs` | 8 | `openStep` 权威性、`turnBoundary` 回退、子代理双通道识别、三桶稳定排序 |
+| `time-range.test.mjs` | 22 | 四档边界、缺失日期、聚合算术、浏览器运行时、DOM 事件、存储容错、HTML 集成 |
+| `daily.test.mjs` | 11 | 跨午夜拆分、未知时间桶、自然日边界、按天聚合去重、按天视图 DOM/存储 |
+| `billing.test.mjs` | 10 | 订阅真实价格摊销、自然月天数、生效日切换、共享提供方合计、idle 成本、设置 API |
 | `live.test.mjs` | 6 | 采集/过滤、模板拆分、原子写入、HTTP API |
-| `opencode-usage.test.mjs` | 13 | 官方行归一、去重、会话覆盖、窗口合计、缓存节省 |
+| `opencode-usage.test.mjs` | 17 | 官方行归一、去重、会话覆盖、窗口合计、缓存节省、401/403 分类与页面提示、`--check-auth` |
+| `i18n.test.mjs` | 5 | 语言标签解析、占位符替换、中英键集与占位符一致 |
 | `sources.test.mjs` | 3 | 多数据源解析、主机+VM 合并、缺失数据源降级 |
 | `sessions.test.mjs` | 2 | 会话发现与读取 |
 | `zstd.test.mjs` | 2 | 多 frame 解压、非压缩 JSONL 兜底 |
-| **合计** | **78** | |
+| **合计（`npm test`）** | **112** | |
 
-CI 会在 Node 22 与 Node 24 上跑同一套测试（`.github/workflows/test.yml`）。
+`npm run test:ps` 另有 45 项 Windows 定向回归测试：无窗口启动（GUI 宿主 + CREATE_NO_WINDOW）、含空格/引号参数的
+引号化、单实例 mutex、离线退避序列、VBS 入口与错误文案，见 [docs/host-sync-windowless.md](docs/host-sync-windowless.md)。
+
+CI 会在 Node 22 与 Node 24 上跑同一套测试，并在 `windows-latest` 上跑 PowerShell 回归测试（`.github/workflows/test.yml`）。
 Node 22 的测试进程隔离开关仍叫 `--experimental-test-isolation`，所以那边执行 `npm run test:node22`。
 
 ---
@@ -476,6 +498,7 @@ Node 22 的测试进程隔离开关仍叫 `--experimental-test-isolation`，所�
 | 0 个会话 | 检查 `--home` / `$DSH_HOME` / `~/.dsh/sessions` 是否有 `session.v4.jsonl.zstd` |
 | 金额和 DSH 对不上 | 运行 `node bin/dsh-cost.mjs --verify`；运行中的会话投影可能滞后，稍后重跑 |
 | 峰时价格没生效 | 用 `--since` 检查采样时间是否落在工作日峰时窗口；12:00 / 18:00 整已是谷值 |
+| 官方用量显示「被控制台拒绝（HTTP 403）」 | 先跑 `node tools\opencode-sync.mjs --check-auth` 复核；再在 Console 的 Account › Personal API keys 检查该 key 的 scope 与工作区。权限足够的 key 可以正常读取；归档保持最后一次成功的快照，重试不会自愈 |
 
 更多排障见 [`LIVE.md#故障排查`](LIVE.md#故障排查)。
 
@@ -489,6 +512,7 @@ Node 22 的测试进程隔离开关仍叫 `--experimental-test-isolation`，所�
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | 数据流、模块职责、关键不变量、扩展点 |
 | [`docs/DSH-TOKEN-ACCOUNTING.md`](docs/DSH-TOKEN-ACCOUNTING.md) | DSH 如何统计 token（事件、投影、替换/重试规则） |
 | [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) | 开发笔记：坑位、调试命令、验收清单、后续想法 |
+| [`docs/host-sync-windowless.md`](docs/host-sync-windowless.md) | 主机→VM 同步链无窗口化：根因、调用链、计划任务接法、回滚、回归测试与实测证据 |
 
 ---
 

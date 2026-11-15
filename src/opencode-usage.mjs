@@ -347,6 +347,43 @@ export function readApiKey(config) {
 }
 
 /**
+ * Classify one console-API rejection so the sync loop and the page can say what
+ * actually happened instead of a generic "sync failed".
+ *
+ * 401 means the credential was not accepted at all (missing, revoked, expired).
+ * 403 means it authenticated but the console refused this read: the usage API is
+ * authorized per workspace/scope, so a key that is perfectly valid for inference
+ * can still lack the permission to read console usage. A key with the required
+ * scope does read it, so 403 means "this credential may not", not "no key can":
+ * check the key's scope and workspace before replacing it. Neither status gets
+ * better by retrying, which is why both are terminal for the loop.
+ */
+export function describeSyncFailure(status, body = '') {
+  const code = Number(status) || 0;
+  const tag = /"_tag"\s*:\s*"([^"]*)"/u.exec(typeof body === 'string' ? body : '')?.[1] ?? null;
+  if (code === 401) {
+    return {
+      status: code,
+      kind: 'unauthorized',
+      tag,
+      hint: 'OPENCODE_GO_API_KEY 缺失或已失效：请在 OpenCode Console 重新生成 Personal API key，并更新环境变量或 official.json 的 credentials 指向的凭据文件',
+    };
+  }
+  if (code === 403) {
+    return {
+      status: code,
+      kind: 'forbidden',
+      tag,
+      hint: '该凭据通过了鉴权，但控制台拒绝读取用量（权限或作用域不足）：先用 opencode-sync --check-auth 复核，再在 Console 的 Account › Personal API keys 确认这个 key 的 scope 与绑定的工作区。权限足够的 key 可以正常读取，归档保持最后一次成功的快照，重试不会自愈',
+    };
+  }
+  if (code === 429 || code >= 500) {
+    return { status: code, kind: 'transient', tag, hint: '控制台暂时拒绝或过载：稍后自动重试' };
+  }
+  return { status: code, kind: 'http', tag, hint: `控制台返回 HTTP ${code}：检查 apiBase 与官方文档是否一致` };
+}
+
+/**
  * Load the archive for reporting. Returns null when official data is disabled,
  * the config file is absent, or the store has no rows yet.
  */

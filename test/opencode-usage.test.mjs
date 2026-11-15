@@ -1,10 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { buildReport, buildTimeRangeDataset } from '../src/report-data.mjs';
+import { renderHtml } from '../src/report-html.mjs';
 import { renderLiveFragment } from '../src/live.mjs';
 import { aggregateDayStats, aggregateRangeStats, formatDay, localMidnight } from '../src/time-range.mjs';
 import {
   applyOfficialOverlay,
+  describeSyncFailure,
   officialWindowTotals,
   groupBySession,
   mergeOfficialRecords,
@@ -14,6 +16,7 @@ import {
   sessionKey,
   summarizeStore,
 } from '../src/opencode-usage.mjs';
+import { checkAuth, nextSyncDelay } from '../tools/opencode-sync.mjs';
 
 const raw = (over = {}) => ({
   id: 'req-1',
@@ -278,6 +281,127 @@ test('daily buckets aggregate every sample of a session, not just the last', () 
   assert.equal(day.sessions[0].tokens.cacheReadTokens, 300, 'session keeps all samples');
   assert.equal(day.sessions[0].costMicroUsd, 3_000_000);
   assert.equal(day.sessions[0].models[0].tokens.cacheReadTokens, 300);
+});
+
+test('console failures are classified for the loop and the page', () => {
+  const forbidden = describeSyncFailure(403, '{"_tag":"Forbidden"}');
+  assert.equal(forbidden.kind, 'forbidden');
+  assert.equal(forbidden.status, 403);
+  assert.equal(forbidden.tag, 'Forbidden');
+  assert.match(forbidden.hint, /Personal API key/u);
+  // A 403 is a permission problem for this credential, not proof that no key
+  // can read the console: a key with the required scope does read it.
+  assert.doesNotMatch(forbidden.hint, /只能调用推理/u);
+  assert.match(forbidden.hint, /权限/u);
+  assert.match(forbidden.hint, /scope/u);
+  assert.match(forbidden.hint, /工作区/u);
+  const missing = describeSyncFailure(401, '{"_tag":"Unauthorized"}');
+  assert.equal(missing.kind, 'unauthorized');
+  assert.match(missing.hint, /OPENCODE_GO_API_KEY/u);
+  assert.equal(describeSyncFailure(429).kind, 'transient');
+  assert.equal(describeSyncFailure(500).kind, 'transient');
+  assert.equal(describeSyncFailure(502).kind, 'transient');
+  const other = describeSyncFailure(404, 'nope');
+  assert.equal(other.kind, 'http');
+  assert.equal(other.tag, null);
+});
+
+test('a refused credential backs off instead of retrying every interval', () => {
+  assert.equal(nextSyncDelay(60_000, null), 60_000);
+  assert.equal(nextSyncDelay(60_000, { kind: 'transient' }), 60_000);
+  assert.equal(nextSyncDelay(60_000, { kind: 'forbidden' }), 300_000);
+  assert.equal(nextSyncDelay(60_000, { kind: 'unauthorized' }), 300_000);
+  // A slower interval already exceeds the floor and must not be shortened.
+  assert.equal(nextSyncDelay(600_000, { kind: 'forbidden' }), 600_000);
+});
+
+test('--check-auth reports the rejection without printing the key', async () => {
+  const config = { apiBase: 'https://console.invalid', credentials: '/nonexistent/credentials.yaml', product: null };
+  const key = 'test-key-not-real';
+  const response = (status, body) => ({ ok: status >= 200 && status < 300, status, text: async () => body });
+  const originalFetch = globalThis.fetch;
+  const previous = process.env.OPENCODE_GO_API_KEY;
+  process.env.OPENCODE_GO_API_KEY = key;
+  const seen = [];
+  try {
+    const run = async (status, body) => {
+      const lines = [];
+      let requested = '';
+      globalThis.fetch = async (url) => {
+        requested = String(url);
+        return response(status, body);
+      };
+      const code = await checkAuth(config, { log: (line) => lines.push(line) });
+      seen.push(requested);
+      return { code, lines };
+    };
+    const ok = await run(200, '{"items":[]}');
+    assert.equal(ok.code, 0);
+    assert.match(ok.lines.join('\n'), /auth ok/u);
+    assert.match(seen[0], /request-logs/u);
+    assert.match(seen[0], /limit=1/u);
+    const forbidden = await run(403, '{"_tag":"Forbidden"}');
+    assert.equal(forbidden.code, 3);
+    const forbiddenText = forbidden.lines.join('\n');
+    assert.match(forbiddenText, /HTTP 403/u);
+    assert.match(forbiddenText, /Personal API key/u);
+    assert.doesNotMatch(forbiddenText, /只能调用推理/u);
+    const unauthorized = await run(401, '{"_tag":"Unauthorized"}');
+    assert.equal(unauthorized.code, 4);
+    assert.match(unauthorized.lines.join('\n'), /OPENCODE_GO_API_KEY/u);
+    for (const result of [ok, forbidden, unauthorized]) {
+      assert.ok(result.lines.every((line) => !line.includes(key)), 'the key itself is never logged');
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (previous === undefined) delete process.env.OPENCODE_GO_API_KEY;
+    else process.env.OPENCODE_GO_API_KEY = previous;
+  }
+});
+
+test('a rejected key is named instead of blaming a stopped loop', () => {
+  const pricing = { currency: 'CNY', unitTokens: 1_000_000, models: {}, aliases: {} };
+  const buckets = { uncachedInputTokens: 10, outputTokens: 5, cacheWriteTokens: 0, cacheReadTokens: 100 };
+  const generatedAt = 1793400200000;
+  const report = buildReport({
+    home: 'test',
+    sources: [],
+    pricing,
+    results: [
+      {
+        meta: { id: 'sync-note', title: 'sync', createdAt: 1793400000000, source: '主机', official: true },
+        analysis: {
+          records: [{ time: 1793400000000, provider: 'opencode', model: 'deepseek-v4.1-flash', priceKey: 'opencode-official', priced: true, buckets, costMicroCny: 0, costMicroUsd: 1_000_000 }],
+          totals: { tokens: { ...buckets }, totalTokens: 115, costMicroCny: 0, costCny: 0, costMicroUsd: 1_000_000, costUsd: 1, cacheHit: 0.9, samples: 1 },
+          byModel: [{ provider: 'opencode', model: 'deepseek-v4.1-flash', priceKey: 'opencode-official', priced: true, tokens: { ...buckets }, costMicroCny: 0, costCny: 0, costMicroUsd: 1_000_000, costUsd: 1, share: 1, samples: 1 }],
+          byTurn: [],
+          unpricedModels: [],
+        },
+      },
+    ],
+    generatedAt,
+  });
+  const official = {
+    store: '/tmp/store',
+    requests: 10,
+    sessions: 1,
+    skippedMixed: 0,
+    windows: { today: 1, '7d': 2, '30d': 3, all: 3 },
+    storeUpdatedAt: generatedAt - 42 * 60_000,
+    syncError: null,
+  };
+  // The page also embeds the client-side string table, so assertions have to
+  // read the console note itself, not the whole document.
+  const consoleNoteOf = (html) => /<div class="note[^"]*">([^<]*官方口径[^<]*)<\/div>/u.exec(html)?.[1] ?? '';
+  assert.match(consoleNoteOf(renderHtml({ ...report, official })), /同步循环可能已停止/u);
+  const rejected = renderHtml({ ...report, official: { ...official, syncError: { at: generatedAt, status: 403, kind: 'forbidden', message: 'HTTP 403 Forbidden' } } });
+  assert.match(consoleNoteOf(rejected), /HTTP 403/u);
+  assert.match(consoleNoteOf(rejected), /Personal API key/u);
+  assert.match(consoleNoteOf(rejected), /scope/u);
+  assert.doesNotMatch(consoleNoteOf(rejected), /只能调用推理/u);
+  assert.doesNotMatch(consoleNoteOf(rejected), /同步循环可能已停止/u);
+  const missing = renderHtml({ ...report, official: { ...official, syncError: { at: generatedAt, status: 401, kind: 'unauthorized', message: 'HTTP 401 Unauthorized' } } });
+  assert.match(consoleNoteOf(missing), /OPENCODE_GO_API_KEY/u);
 });
 
 test('official windows: today is the local day, 7/30 days are rolling', () => {

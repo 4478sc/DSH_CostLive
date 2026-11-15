@@ -31,6 +31,7 @@
   "scripts": {
     "test": "node --test --test-isolation=none test/*.test.mjs",
     "test:node22": "node --experimental-test-isolation=none --test test/*.test.mjs",
+    "test:ps": "powershell -NoProfile -ExecutionPolicy Bypass -File test/host-sync.tests.ps1",
     "demo": "node tools/make-demo-home.mjs",
     "live": "node bin/dsh-cost-live.mjs",
     "live:demo": "node bin/dsh-cost-live.mjs --home demo-home",

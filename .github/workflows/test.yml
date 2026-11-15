@@ -31,6 +31,14 @@ jobs:
       - name: Run tests
         run: ${{ matrix.command }}
 
+  host-sync:
+    name: host sync (windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Windowless launcher, mutex, backoff and error text
+        run: npm run test:ps
+
   readme:
     name: readme parity
     runs-on: ubuntu-latest

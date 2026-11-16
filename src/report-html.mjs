@@ -110,6 +110,32 @@ export function buildReportDataset(report) {
   return { ...buildTimeRangeDataset({ sessions: reference.sessions, daily: reference.daily, pricing, pageSize: SESSION_PAGE_SIZE }), billing: report.billing ?? null };
 }
 
+/**
+ * Main-vs-subagent role pill. Both views share it so a session is labelled the
+ * same way in the by-session list and inside an expanded day.
+ */
+function rolePill(isSubagent, tr) {
+  return isSubagent === true
+    ? `<span class="pill pill-sub">${escapeHtml(tr('pill.subagent'))}</span>`
+    : `<span class="pill pill-main">${escapeHtml(tr('role.main'))}</span>`;
+}
+
+/**
+ * Direct parent session name for a subagent. The name comes from the parent's
+ * title; a missing/untitled parent yields a localized placeholder, never the
+ * session id (the id keeps its own muted line elsewhere).
+ */
+function parentName(session, tr) {
+  const title = typeof session?.parentTitle === 'string' ? session.parentTitle.trim() : '';
+  return title === '' ? tr('parent.unavailable') : title;
+}
+
+/** Parent-session line shown under a subagent row in both views. */
+function parentLine(session, tr) {
+  if (session?.isSubagent !== true) return '';
+  return `<div class="subtle parent-line">${escapeHtml(tr('parent.label'))}<span class="parent-name">${escapeHtml(parentName(session, tr))}</span></div>`;
+}
+
 /** Render a bar whose width is relative to `max`. */
 function bar(value, max, className = '') {
   const width = max <= 0 ? 0 : Math.max(2, Math.round((value / max) * 100));
@@ -222,8 +248,9 @@ export function renderHtml(report, options = {}) {
       const hiddenAttr = extra ? ' hidden' : '';
       const flags = [
         running ? `<span class="pill pill-run"><i aria-hidden="true"></i>${tr('pill.running')}</span>` : '',
-        subagent ? `<span class="pill pill-sub">${tr('pill.subagent')}</span>` : '',
+        rolePill(subagent, tr),
       ].join('');
+      const parentNote = parentLine(session, tr);
       const modelChips = session.models
         .map(
           (model) =>
@@ -250,6 +277,7 @@ export function renderHtml(report, options = {}) {
             <div class="title">${escapeHtml(session.title ?? '(untitled)')}</div>
             <div class="mono subtle">${escapeHtml(session.id)} ${sourceBadge(session.source)}</div>
             ${flags === '' ? '' : `<div class="flags">${flags}</div>`}
+            ${parentNote}
           </td>
           <td>${modelChips || '<span class="muted">—</span>'}</td>
           <td class="num">${formatTokens(session.totals.totalTokens)}</td>
@@ -263,6 +291,8 @@ export function renderHtml(report, options = {}) {
             <div class="detail-inner">
               <div class="detail-meta">
                 <span>${tr('detail.status')} ${escapeHtml(activityLabel({ running, isSubagent: subagent }, locale === 'en' ? MESSAGES.en : null))}</span>
+                <span>${tr('detail.role')} ${escapeHtml(subagent ? tr('pill.subagent') : tr('role.main'))}</span>
+                ${subagent ? `<span>${escapeHtml(tr('detail.parent'))} <span class="parent-name">${escapeHtml(parentName(session, tr))}</span></span>` : ''}
                 <span>${tr('detail.workspace')} <code>${escapeHtml(session.cwd ?? session.workspaceDir)}</code></span>
                 <span>${tr('detail.preset')} ${escapeHtml(session.agentPreset ?? '—')}</span>
                 <span>${tr('detail.cacheHit')} ${formatPercent(session.totals.cacheHit)}</span>
@@ -295,7 +325,7 @@ export function renderHtml(report, options = {}) {
             )
             .join('');
           return `<tr>
-            <td><div class="title">${escapeHtml(session.title ?? '(untitled)')}</div><div class="mono subtle">${escapeHtml(session.id)} ${sourceBadge(session.source)}</div></td>
+            <td><div class="title">${escapeHtml(session.title ?? '(untitled)')}</div><div class="mono subtle">${escapeHtml(session.id)} ${sourceBadge(session.source)}</div><div class="flags">${rolePill(session.isSubagent === true, tr)}</div>${parentLine(session, tr)}</td>
             <td>${chips || '<span class="muted">—</span>'}</td>
             <td class="num">${formatTokens(session.tokens.totalTokens)}</td>
             <td class="num muted">${session.samples}</td>
@@ -447,6 +477,10 @@ export function renderHtml(report, options = {}) {
   .pill-run { background: #dcfce7; border: 1px solid #bbf7d0; color: #15803d; }
   .pill-run i { width: 5px; height: 5px; border-radius: 50%; background: #16a34a; animation: run-pulse 1.8s ease-in-out infinite; }
   .pill-sub { background: #eef2f6; border: 1px solid var(--line); color: var(--muted); font-weight: 600; }
+  .pill-main { background: #e0f2fe; border: 1px solid #bae6fd; color: #0369a1; font-weight: 600; }
+  .parent-line { margin-top: 4px; }
+  .parent-line .parent-name { color: #475569; font-weight: 550; }
+  .detail-meta .parent-name { color: var(--text); font-weight: 550; }
   .cost-cell { min-width: 132px; }
   .bar { height: 4px; background: #edf0f4; border-radius: 999px; margin-top: 6px; overflow: hidden; }
   .bar i { display: block; height: 100%; background: var(--accent); border-radius: 999px; opacity: .75; }

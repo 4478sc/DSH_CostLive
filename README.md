@@ -43,6 +43,7 @@ DSH 会把每个会话的完整事件流写进 `~/.dsh/sessions/` 下的 zstd �
 | 四档时间范围 | `All time` / `Last 30 days` / `Last 7 days` / `Today`，卡片、模型表、明细同步重算，选择持久化 |
 | 按天费用视图 | 「按会话 / 按天」切换；按采样时间切日，跨天会话拆到两天，严格回答「今天花了多少」 |
 | 运行中优先 | 运行中主会话 → 运行中子代理 → 已完成（费用降序）；运行中行高亮 + 脉冲标签；一个 step 超过 2 小时没有更新即视为中断（DSH 被强杀后会留下 openStep） |
+| 主/子角色与父会话名 | 会话明细与按天明细都标出「主会话 / 子代理」；子代理显示其**直接父会话的标题**，父会话被时间范围/筛选/分页挡掉或不在当天也照样解析（按同一数据源的全量会话），父会话缺失或无标题时显示「父会话名称不可用」，绝不用 sessionID 冒充名字 |
 | 前 5 行折叠 | 首屏只显示 5 条，其余折叠；「显示更多（还有 N 个）」**每点一次多显示 5 条**，展开后可随时点「收起」一键回到第一页（全部展开时按钮也变成「收起」），状态在刷新与筛选间保持 |
 | 分模型汇总 | 每个 provider/model 的四桶 token、费用、**Token均价**、占比、会话数；未定价模型单独标注；两档价模型（DeepSeek）按峰值/谷值拆成两行 |
 | 峰谷两档价 | `deepseek-v4.1-flash` 按**每条采样自己的时间戳**判定工作日峰时/谷时，跨时段会话分段计价；汇总、会话明细、按天明细里都显示为「（峰值）/（谷值）」两行 |
@@ -284,7 +285,8 @@ session 头 / session/title / request.header / assistant.message / llm.retry-sta
 ```
 
 - DSH 数据目录优先级：`--sources` / `--source` → `--home` → `$DSH_HOME` → `~/.dsh`；多数据源时每个会话带来源标签。
-- 子代理是独立会话（独立日志、独立计价），面板会打「子代理」标签并排在主会话之后。
+- 子代理是独立会话（独立日志、独立计价），面板会打「子代理」标签并排在主会话之后，主会话标「主会话」。
+- 子代理还会显示**直接父会话的标题**（不是根会话、也不是 sessionID）。父会话可能落在当前时间范围、`--model`/`--workspace`/`--top` 或分页之外，名称仍从**同一数据源**的完整会话集合解析，不会串到别的 home；父会话不存在或其标题为空时显示「父会话名称不可用」。
 - 投影缓存 `~/.dsh/storages/session_projcache/sessions/<id>.json` 只用于运行状态、标题与
   `--verify` 对账；金额始终由日志重算。
 
@@ -301,6 +303,7 @@ HTML 报告与实时页都提供「按会话 / 按天」切换（存于 `localSt
 - 时间范围在按天视图下按自然日计算：Today = 今天，7 天 = 含今天共 7 个自然日，30 天同理；
   边界使用本机时区。没有时间戳的采样只出现在 All time 的「未知日期」行，不会被静默丢掉。
 - 所有日桶之和严格等于会话总计：拆分不改变总额，也不会重复计费。
+- 展开某天后，每个会话行同样标「主会话 / 子代理」；子代理显示直接父会话名，父会话即使落在别的日期（或已被时间范围过滤）也能解析。
 
 ### 价格表
 
@@ -409,6 +412,7 @@ DSH_CostLive/
 │  ├─ sources.mjs             # 主机/VM 多数据源解析与标签
 │  ├─ zstd.mjs                # 多 frame zstd 解压（Node 只解第一帧）
 │  ├─ activity.mjs            # 运行中/子代理判定与排序
+│  ├─ lineage.mjs             # 父会话名解析（session- 前缀归一、按数据源隔离）
 │  ├─ time-range.mjs          # 四档筛选 + 按天视图运行时（Node 与页面共用）
 │  ├─ report-data.mjs         # 会话记录、按天聚合、数据集、CSV
 │  ├─ report-text.mjs         # 终端表格 / 明细 / 价格表
@@ -416,7 +420,7 @@ DSH_CostLive/
 │  ├─ live.mjs                # 实时页文档 / 片段 / 原子写入
 │  ├─ live-server.mjs         # 本地 HTTP 服务与三个 API
 │  └─ live-client.js          # 浏览器端：轮询、折叠、范围、滚动恢复
-├─ test/                      # node:test 12 个文件 112 项 + Windows 回归测试
+├─ test/                      # node:test 13 个文件 122 项 + Windows 回归测试
 ├─ tools/make-demo-home.mjs   # 合成演示数据生成器
 ├─ tools/sync-vm-dsh.ps1      # 从 VMware VM 增量同步 ~/.dsh 到 .dsh-vm
 ├─ tools/vm-sync-snapshot.sh  # VM 端增量打包脚本
@@ -455,7 +459,8 @@ npm test
 | `sources.test.mjs` | 3 | 多数据源解析、主机+VM 合并、缺失数据源降级 |
 | `sessions.test.mjs` | 2 | 会话发现与读取 |
 | `zstd.test.mjs` | 2 | 多 frame 解压、非压缩 JSONL 兜底 |
-| **合计（`npm test`）** | **112** | |
+| `parent-session.test.mjs` | 10 | 父会话 id 归一、按数据源解析、筛选外父名、嵌套父代理、缺失/无标题兜底、两视图角色标记、HTML 转义、数据集字段 |
+| **合计（`npm test`）** | **122** | |
 
 `npm run test:ps` 另有 45 项 Windows 定向回归测试：无窗口启动（GUI 宿主 + CREATE_NO_WINDOW）、含空格/引号参数的
 引号化、单实例 mutex、离线退避序列、VBS 入口与错误文案，见 [docs/host-sync-windowless.md](docs/host-sync-windowless.md)。

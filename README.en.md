@@ -47,6 +47,7 @@ collect / price / render code as the report, so page numbers always match the CL
 | Four time ranges | `All time` / `Last 30 days` / `Last 7 days` / `Today`; cards, model table and detail rows recompute together and the choice is persisted |
 | Per-day view | "By session / By day"; the by-day view buckets each sample by its own time, splitting midnight-crossing sessions in two, so it answers "how much did today actually cost" |
 | Running first | Running main sessions → running subagents → finished (cost descending); running rows are highlighted with a pulsing label; a step with no update for 2 hours counts as abandoned (a killed DSH leaves an `openStep` behind) |
+| Role and parent name | Session detail and the by-day detail both label "main session / subagent"; a subagent also shows **its direct parent session's title**, resolved from the same source's complete session set even when the parent is outside the active range, filtered out, or paged away. A missing or untitled parent shows "parent session name unavailable" — the session id is never used as the name |
 | First 5 rows | Only five rows on first paint; "show more (N left)" **reveals five more rows per click**; once expanded, a "show less" button collapses straight back to the first page (the main button also becomes "show less" when everything is visible), and the state survives refreshes and filters |
 | Per-model summary | Four token buckets, cost, **average price per 1M tokens** and share per provider/model; unpriced models are flagged; two-tier models (DeepSeek) are split into peak/off-peak rows |
 | Peak/off-peak pricing | `deepseek-v4.1-flash` picks its tier from **each sample's own timestamp** on weekdays, and a session that crosses the boundary is priced in two parts; summary, session detail and daily detail all show the "（峰值）/（谷值）" rows |
@@ -324,7 +325,11 @@ four token buckets + per-sample provider/model/time → priced by the model tabl
 - DSH data directory precedence: `--sources` / `--source` → `--home` → `$DSH_HOME` → `~/.dsh`; with several
   sources every session carries its origin label.
 - A subagent is a separate session (own log, own invoice); the page labels it "subagent" and sorts it after its
-  parent session.
+  parent session, while a main session is labelled "main session".
+- A subagent also shows **its direct parent session's title** (never the root session and never the session id). The
+  parent may be outside the active range, `--model`/`--workspace`/`--top`, or the current page, so the name is
+  resolved from the complete session set of the **same source** and never crosses into another DSH home; a missing
+  parent or an empty title renders "parent session name unavailable".
 - The projection cache `~/.dsh/storages/session_projcache/sessions/<id>.json` is only used for run state, titles
   and `--verify`; amounts are always recomputed from the log.
 
@@ -345,6 +350,8 @@ Both the HTML report and the live page offer the "by session / by day" toggle (s
   boundaries follow the local time zone. Samples without a timestamp only appear in the "unknown date" row under
   All time and are never silently dropped.
 - The daily buckets always add up to the session totals: splitting changes no amount and double-bills nothing.
+- Expanding a day labels every session row "main session / subagent"; a subagent shows its direct parent's name even
+  when the parent falls on another day (or was filtered out by the active range).
 
 ### Price table
 
@@ -459,6 +466,7 @@ DSH_CostLive/
 │  ├─ sources.mjs             # host/VM source resolution and labels
 │  ├─ zstd.mjs                # multi-frame zstd decompress (Node only decodes the first frame)
 │  ├─ activity.mjs            # running / subagent detection and ordering
+│  ├─ lineage.mjs             # parent-session name resolution (session- prefix, per-source isolation)
 │  ├─ time-range.mjs          # four ranges + by-day runtime (shared by Node and the page)
 │  ├─ report-data.mjs         # session records, daily aggregation, dataset, CSV
 │  ├─ report-text.mjs         # terminal tables / detail / price list
@@ -466,7 +474,7 @@ DSH_CostLive/
 │  ├─ live.mjs                # live document / fragment / atomic write
 │  ├─ live-server.mjs         # local HTTP server and the three APIs
 │  └─ live-client.js          # browser side: polling, folding, ranges, scroll restore
-├─ test/                      # node:test, 12 files, 112 cases + the Windows regression test
+├─ test/                      # node:test, 13 files, 122 cases + the Windows regression test
 ├─ tools/make-demo-home.mjs   # synthetic demo data generator
 ├─ tools/sync-vm-dsh.ps1      # incremental ~/.dsh → .dsh-vm sync from a VMware VM
 ├─ tools/vm-sync-snapshot.sh  # VM-side incremental packer
@@ -505,7 +513,8 @@ npm test
 | `sources.test.mjs` | 3 | Multi-source parsing, host+VM merge, degraded missing source |
 | `sessions.test.mjs` | 2 | Session discovery and reading |
 | `zstd.test.mjs` | 2 | Multi-frame decompression, plain JSONL fallback |
-| **Total (`npm test`)** | **112** | |
+| `parent-session.test.mjs` | 10 | Parent id normalization, per-source resolution, parent outside the range, nested parents, missing/untitled fallbacks, role markers in both views, HTML escaping, dataset fields |
+| **Total (`npm test`)** | **122** | |
 
 `npm run test:ps` adds 45 Windows-targeted regression cases: windowless start (GUI host + CREATE_NO_WINDOW),
 argument quoting with spaces and quotes, the single-instance mutex, the offline retry ramp, the VBS entry point and

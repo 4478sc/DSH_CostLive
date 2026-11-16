@@ -1,5 +1,6 @@
 /** Machine-readable report builders: JSON and CSV. */
 import { isSubagentSession, projectionIsRunning, sortSessionRecords } from './activity.mjs';
+import { resolveSessionParents } from './lineage.mjs';
 import { canonicalProvider, resolvePrice } from './pricing.mjs';
 import { averageTokenPrice, sortCostMicro } from './money.mjs';
 import { formatDay, localMidnight } from './time-range.mjs';
@@ -11,10 +12,19 @@ function round(value, digits = 6) {
   return Math.round(value * factor) / factor;
 }
 
-/** Convert one analysis into a JSON-safe session record. */
-export function sessionRecord({ meta, analysis, projection }) {
+/**
+ * Convert one analysis into a JSON-safe session record.
+ *
+ * @param {object} result - `{ meta, analysis, projection }`.
+ * @param {Map<object, object>} [parents] - output of `resolveSessionParents`, keyed
+ *   by the same `meta` object. The parent *name* is the parent session's title;
+ *   `parentTitle` stays null when it is unknown so the renderer can localize a
+ *   placeholder instead of printing an id as a name.
+ */
+export function sessionRecord({ meta, analysis, projection }, parents) {
   const running = typeof meta.running === 'boolean' ? meta.running : projectionIsRunning(projection);
   const isSubagent = typeof meta.isSubagent === 'boolean' ? meta.isSubagent : isSubagentSession(meta, projection);
+  const parent = parents instanceof Map ? parents.get(meta) ?? null : null;
   return {
     id: meta.id,
     uid: meta.source ? `${meta.source}:${meta.id}` : meta.id,
@@ -27,6 +37,8 @@ export function sessionRecord({ meta, analysis, projection }) {
     delegationDepth: meta.delegationDepth,
     origin: meta.origin ?? null,
     parentSession: meta.parentSession ?? null,
+    parentTitle: parent?.parentTitle ?? null,
+    parentFound: parent?.parentFound === true,
     running,
     isSubagent,
     official: meta.official === true,
@@ -113,8 +125,12 @@ function tokensTotal(tokens) {
  *
  * Samples without a usable timestamp land in a synthetic "unknown" bucket
  * (`dayStart: 0`), which only the All-time view shows.
+ *
+ * `parents` carries the resolved parent-session names (same map as
+ * `sessionRecord`), so the per-day session rows can label subagents the same
+ * way the by-session view does — even when the parent falls on another day.
  */
-export function buildDailyReport(results, pricing) {
+export function buildDailyReport(results, pricing, parents) {
   const days = new Map();
 
   const dayEntry = (dayStart) => {
@@ -162,6 +178,8 @@ export function buildDailyReport(results, pricing) {
           title: meta.title ?? null,
           running: meta.running === true,
           isSubagent: meta.isSubagent === true,
+          parentTitle: parents instanceof Map ? parents.get(meta)?.parentTitle ?? null : null,
+          parentFound: parents instanceof Map ? parents.get(meta)?.parentFound === true : false,
           costMicroCny: 0,
           costMicroUsd: 0,
           samples: 0,
@@ -237,6 +255,8 @@ export function buildDailyReport(results, pricing) {
         title: session.title,
         running: session.running,
         isSubagent: session.isSubagent,
+        parentTitle: session.parentTitle ?? null,
+        parentFound: session.parentFound === true,
         costMicroCny: session.costMicroCny,
         costMicroUsd: session.costMicroUsd,
         samples: session.samples,
@@ -327,6 +347,8 @@ export function buildTimeRangeDataset({ sessions, pricing, pageSize = 5, daily }
         createdAt: typeof session.createdAt === 'number' ? session.createdAt : null,
         running: session.running === true,
         isSubagent: session.isSubagent === true,
+        parentTitle: session.parentTitle ?? null,
+        parentFound: session.parentFound === true,
         costMicroCny: session.totals.costMicroCny,
         costMicroUsd: session.totals.costMicroUsd ?? 0,
         cacheSavingMicro: models.reduce((sum, model) => sum + model.cacheSavingMicro, 0),
@@ -365,6 +387,8 @@ export function buildTimeRangeDataset({ sessions, pricing, pageSize = 5, daily }
         title: session.title,
         running: session.running === true,
         isSubagent: session.isSubagent === true,
+        parentTitle: session.parentTitle ?? null,
+        parentFound: session.parentFound === true,
         costMicroCny: session.costMicroCny,
         costMicroUsd: session.costMicroUsd ?? 0,
         samples: session.samples,
@@ -388,7 +412,11 @@ export function buildTimeRangeDataset({ sessions, pricing, pageSize = 5, daily }
 
 /** Build the complete report object emitted by `--format json`. */
 export function buildReport({ home, sources = [], pricing, results, generatedAt, billing, billingBounds }) {
-  const sessions = results.map(sessionRecord);
+  // Parent names are resolved from every session of the same source, not from
+  // the filtered result set, so a parent outside the active range still has a
+  // name. The same map feeds the session records and the daily buckets.
+  const parents = resolveSessionParents({ results, sources });
+  const sessions = results.map((result) => sessionRecord(result, parents));
   // Running main -> running subagent -> completed (cost/time order within each
   // bucket). buildReport is shared by the CLI, JSON/CSV output, and the live
   // dashboard, so sorting here keeps every surface consistent.
@@ -450,7 +478,7 @@ export function buildReport({ home, sources = [], pricing, results, generatedAt,
       pendingModels: [...new Set(sessions.flatMap((session) => session.pendingModels ?? []))],
     },
     sessions,
-    daily: buildDailyReport(results, pricing),
+    daily: buildDailyReport(results, pricing, parents),
     sources: sources.map((source) => ({
       label: source.label,
       home: source.home,

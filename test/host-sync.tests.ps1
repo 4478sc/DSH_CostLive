@@ -49,6 +49,8 @@ function Assert-Equal($Actual, $Expected, [string]$Name) {
 
 $Temp = Join-Path ([IO.Path]::GetTempPath()) ('costlive-sync-test-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $Temp -Force | Out-Null
+# Stray processes a timeout test may leave behind if the kill itself failed.
+$script:StrayPids = @()
 
 try {
   # --- files and encoding -------------------------------------------------
@@ -75,7 +77,7 @@ try {
   Assert-True ($ensureText -match 'Join-Path \$PSScriptRoot ''hidden-launch\.ps1''') 'ensure-host-sync loads the in-repo helper'
 
   . $Helper
-  foreach ($name in @('New-HiddenStartInfo', 'Start-HiddenProcess', 'Start-HiddenPowerShell', 'ConvertTo-NativeArgument', 'Test-ProcessMutex', 'Get-NextRetryDelay')) {
+  foreach ($name in @('New-HiddenStartInfo', 'Start-HiddenProcess', 'Start-HiddenPowerShell', 'Wait-HiddenProcessExit', 'ConvertTo-NativeArgument', 'Test-ProcessMutex', 'Get-NextRetryDelay', 'Get-ProcessSnapshot', 'Get-ProcessParentMap', 'Get-ProcessTreeOrder', 'Stop-ProcessTree', 'Get-ProcessIdentity', 'Test-ProcessIdentity', 'Write-Heartbeat', 'Read-Heartbeat', 'Get-HeartbeatPolicy', 'Test-WatchdogAction')) {
     Assert-True ($null -ne (Get-Command -Name $name -ErrorAction SilentlyContinue)) ('helper exports ' + $name)
   }
 
@@ -102,6 +104,62 @@ try {
   Assert-Equal (Get-NextRetryDelay -Current 0 -Start 5 -Max 60).Delay 5 'retry ramp: clamps below Start'
   Assert-Equal (Get-NextRetryDelay -Current 600 -Start 5 -Max 60).Delay 60 'retry ramp: clamps above Max'
   Assert-Equal (Get-NextRetryDelay -Current 60 -Start 5 -Max 60).Next 60 'retry ramp: stays capped'
+
+  # --- process tree order (portable) --------------------------------------
+  $parentMap = @{ 1 = 0; 2 = 1; 3 = 1; 4 = 2; 5 = 4 }
+  $order = Get-ProcessTreeOrder -RootId 1 -ParentMap $parentMap
+  Assert-Equal $order.Count 5 'tree order: every process of the tree is listed once'
+  $limits = @{}
+  for ($i = 0; $i -lt $order.Count; $i += 1) { $limits[[int]$order[$i]] = $i }
+  $childrenFirst = $true
+  foreach ($id in @(2, 3, 4, 5)) {
+    if (-not ($limits[$id] -lt $limits[[int]$parentMap[$id]])) { $childrenFirst = $false }
+  }
+  Assert-True $childrenFirst 'tree order: every child is killed before its parent'
+  Assert-Equal $order[$order.Count - 1] 1 'tree order: the root is killed last'
+  Assert-Equal ((Get-ProcessTreeOrder -RootId 99 -ParentMap $parentMap) -join ',') '99' 'tree order: an unknown root yields only itself'
+  Assert-Equal ((Get-ProcessTreeOrder -RootId 1 -ParentMap @{}) -join ',') '1' 'tree order: an empty map yields only the root'
+  $cycleMap = @{ 1 = 2; 2 = 1 }
+  Assert-Equal ((Get-ProcessTreeOrder -RootId 1 -ParentMap $cycleMap | Sort-Object) -join ',') '1,2' 'tree order: a parent cycle terminates'
+
+  # --- process identity (portable) ----------------------------------------
+  $expectedIdentity = [pscustomobject]@{ Pid = 42; StartedAt = [datetime]'2026-11-18T23:25:10'; Name = 'ssh.exe' }
+  $sameIdentity = [pscustomobject]@{ Pid = 42; StartedAt = [datetime]'2026-11-18T23:25:10.400'; Name = 'ssh.exe'; CommandLine = 'ssh.exe -i key host tar -xzf x' }
+  Assert-True (Test-ProcessIdentity -Expected $expectedIdentity -Actual $sameIdentity) 'identity: same pid and start time matches'
+  $recycledIdentity = [pscustomobject]@{ Pid = 42; StartedAt = [datetime]'2026-11-19T01:00:00'; Name = 'ssh.exe'; CommandLine = 'ssh.exe other' }
+  Assert-True (-not (Test-ProcessIdentity -Expected $expectedIdentity -Actual $recycledIdentity)) 'identity: a recycled pid (newer start time) is rejected'
+  $otherImage = [pscustomobject]@{ Pid = 42; StartedAt = [datetime]'2026-11-18T23:25:10'; Name = 'notepad.exe'; CommandLine = 'notepad.exe x' }
+  Assert-True (-not (Test-ProcessIdentity -Expected $expectedIdentity -Actual $otherImage)) 'identity: a different image is rejected'
+  Assert-True (-not (Test-ProcessIdentity -Expected $expectedIdentity -Actual $null)) 'identity: a missing process is rejected'
+  Assert-True (-not (Test-ProcessIdentity -Expected $null -Actual $sameIdentity)) 'identity: no recorded identity never matches'
+  Assert-True (-not (Test-ProcessIdentity -Expected $expectedIdentity -Actual $sameIdentity -CommandLinePattern 'push-loop\.ps1')) 'identity: a command line that does not match is rejected'
+  Assert-True (Test-ProcessIdentity -Expected $expectedIdentity -Actual $sameIdentity -CommandLinePattern 'tar -xzf') 'identity: a matching command line is accepted'
+  $noStart = [pscustomobject]@{ Pid = 42; StartedAt = $null; Name = 'ssh.exe'; CommandLine = 'ssh.exe x' }
+  Assert-True (-not (Test-ProcessIdentity -Expected $expectedIdentity -Actual $noStart)) 'identity: a process with no start time is rejected'
+
+  # --- heartbeat thresholds and decisions (portable) ----------------------
+  $policy = Get-HeartbeatPolicy -OperationTimeoutSeconds 120 -IntervalSeconds 20 -MarginSeconds 30
+  Assert-Equal $policy.StaleSeconds 170 'policy: stale = upload bound + interval + margin'
+  Assert-True ($policy.StaleSeconds -gt $policy.OperationTimeoutSeconds) 'policy: stale stays above a legitimate bounded upload'
+  Assert-True ($policy.StartupGraceSeconds -gt $policy.StaleSeconds) 'policy: startup grace sits above the stale threshold'
+  Assert-True ($policy.StartupGraceSeconds -gt $policy.OperationTimeoutSeconds) 'policy: startup grace stays above a legitimate bounded upload'
+  Assert-Equal (Get-HeartbeatPolicy -OperationTimeoutSeconds 120 -IntervalSeconds 20 -StaleSeconds 30).StaleSeconds 170 'policy: a too-small stale override is raised to the floor'
+  Assert-Equal (Get-HeartbeatPolicy -OperationTimeoutSeconds 120 -IntervalSeconds 20 -StaleSeconds 600).StaleSeconds 600 'policy: a larger stale override is kept'
+  Assert-Equal (Get-HeartbeatPolicy -OperationTimeoutSeconds 120 -IntervalSeconds 20 -StartupGraceSeconds 10).StartupGraceSeconds 190 'policy: a too-small grace override is raised to the floor'
+
+  $freshBeat = [pscustomobject]@{ Present = $true; AgeSeconds = 5.0; Pid = 19136; StartedAt = [datetime]'2026-11-18T18:43:06' }
+  $staleBeat = [pscustomobject]@{ Present = $true; AgeSeconds = 6000.0; Pid = 38640; StartedAt = [datetime]'2026-11-18T23:25:10' }
+  $missingBeat = [pscustomobject]@{ Present = $false; AgeSeconds = $null; Pid = 0; StartedAt = $null }
+
+  Assert-Equal (Test-WatchdogAction -MutexPresent $true -Heartbeat $freshBeat -SupervisorAgeSeconds 3600).Action 'none' 'watchdog: a fresh heartbeat is left alone'
+  Assert-Equal (Test-WatchdogAction -MutexPresent $false -Heartbeat $freshBeat -SupervisorAgeSeconds 3600).Action 'none' 'watchdog: a fresh heartbeat suppresses a second start even without a mutex'
+  Assert-Equal (Test-WatchdogAction -MutexPresent $true -Heartbeat $staleBeat -SupervisorAgeSeconds 3600).Action 'reclaim' 'watchdog: a stale heartbeat with a held mutex is reclaimed'
+  Assert-Equal (Test-WatchdogAction -MutexPresent $false -Heartbeat $staleBeat -SupervisorAgeSeconds 3600).Action 'restart' 'watchdog: a stale heartbeat with no owner restarts the loop'
+  Assert-Equal (Test-WatchdogAction -MutexPresent $true -Heartbeat $missingBeat -SupervisorAgeSeconds 10).Action 'none' 'watchdog: a missing heartbeat inside the startup grace does nothing'
+  Assert-Equal (Test-WatchdogAction -MutexPresent $true -Heartbeat $missingBeat -SupervisorAgeSeconds 600).Action 'restart' 'watchdog: a missing heartbeat after the startup grace restarts the loop'
+  Assert-Equal (Test-WatchdogAction -MutexPresent $true -Heartbeat $staleBeat -SupervisorAgeSeconds 3600 -SinceLastRestartSeconds 5 -MinSecondsBetweenRestarts 60).Action 'none' 'watchdog: backoff suppresses a restart storm'
+  Assert-Equal (Test-WatchdogAction -MutexPresent $true -Heartbeat $staleBeat -SupervisorAgeSeconds 3600 -SinceLastRestartSeconds 120 -MinSecondsBetweenRestarts 60).Action 'reclaim' 'watchdog: the reclaim is allowed once the backoff window passed'
+  Assert-Equal (Test-WatchdogAction -MutexPresent $false -Heartbeat $missingBeat -SupervisorAgeSeconds 3600).Action 'restart' 'watchdog: no heartbeat file and no owner restarts the loop'
 
   if (-not $OnWindows) {
     Skip 'start-info flags' 'Windows only'
@@ -161,6 +219,85 @@ Start-Sleep -Seconds 60
     }
     Assert-True $released 'mutex: released after the holder exits'
 
+    # --- heartbeat file parsing -------------------------------------------
+    $beatFile = Join-Path $Temp 'push-loop.heartbeat'
+    Assert-Equal (Read-Heartbeat -Path $beatFile).Present $false 'heartbeat: a missing file reports Present=false'
+    Assert-Equal (Read-Heartbeat -Path $beatFile).Pid 0 'heartbeat: a missing file reports no pid'
+    $beatText = '2026-11-19 01:06:48 pid=19136 started=2026-11-18T18:43:06.0187211+08:00 exit=0 next=20s'
+    Assert-True (Write-Heartbeat -Path $beatFile -Text $beatText) 'heartbeat: write succeeds and creates the directory'
+    $beat = Read-Heartbeat -Path $beatFile
+    Assert-Equal $beat.Present $true 'heartbeat: an existing file reports Present=true'
+    Assert-Equal $beat.Pid 19136 'heartbeat: pid is parsed'
+    Assert-True ($null -ne $beat.StartedAt) 'heartbeat: the recorded start time is parsed'
+    Assert-Equal ([int]$beat.StartedAt.Year) 2026 'heartbeat: the parsed start time is a real date'
+    Assert-True ($beat.AgeSeconds -ge 0 -and $beat.AgeSeconds -lt 120) 'heartbeat: age is measured from the file mtime'
+    Assert-Equal $beat.Raw $beatText 'heartbeat: the raw line is kept for the log'
+
+    # --- bounded wait kills the child and the grandchild ------------------
+    $treeDir = Join-Path $Temp 'tree'
+    New-Item -ItemType Directory -Path $treeDir -Force | Out-Null
+    $grandchildBody = @'
+param([string]$MarkerDir)
+[IO.File]::WriteAllText((Join-Path $MarkerDir 'grandchild.pid'), [string]$PID)
+Start-Sleep -Seconds 120
+'@
+    [IO.File]::WriteAllText((Join-Path $treeDir 'grandchild.ps1'), $grandchildBody, (New-Object Text.UTF8Encoding($false)))
+    $childBody = @'
+param([string]$Helper, [string]$MarkerDir)
+. $Helper
+$exe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+$gc = Start-HiddenProcess -FilePath $exe -Arguments ('-NoProfile -ExecutionPolicy Bypass -File "' + (Join-Path $MarkerDir 'grandchild.ps1') + '" -MarkerDir "' + $MarkerDir + '"')
+[IO.File]::WriteAllText((Join-Path $MarkerDir 'child.pid'), [string]$PID)
+[IO.File]::WriteAllText((Join-Path $MarkerDir 'grandchild.pid'), [string]$gc.Id)
+Start-Sleep -Seconds 120
+'@
+    [IO.File]::WriteAllText((Join-Path $treeDir 'child.ps1'), $childBody, (New-Object Text.UTF8Encoding($false)))
+    $childPid = 0
+    $grandPid = 0
+    $run = Start-HiddenPowerShell -ScriptPath (Join-Path $treeDir 'child.ps1') -ArgumentList @('-Helper', $Helper, '-MarkerDir', $treeDir) -Wait -TimeoutSeconds 6
+    Assert-Equal $run.TimedOut $true 'bounded wait: a hung child times out instead of blocking for ever'
+    Assert-Equal $run.ExitCode -1 'bounded wait: a timeout reports exit -1'
+    for ($i = 0; $i -lt 100; $i += 1) {
+      $childFile = Join-Path $treeDir 'child.pid'
+      $grandFile = Join-Path $treeDir 'grandchild.pid'
+      if ((Test-Path $childFile) -and (Test-Path $grandFile)) {
+        $childPid = [int]((Get-Content $childFile -Raw).Trim())
+        $grandPid = [int]((Get-Content $grandFile -Raw).Trim())
+        break
+      }
+      Start-Sleep -Milliseconds 100
+    }
+    Assert-True ($childPid -gt 0 -and $grandPid -gt 0) 'bounded wait: the stub reported both pids'
+    $script:StrayPids = @($childPid, $grandPid)
+    $childGone = $false
+    $grandGone = $false
+    for ($i = 0; $i -lt 100; $i += 1) {
+      $childGone = -not [bool](Get-Process -Id $childPid -ErrorAction SilentlyContinue)
+      $grandGone = -not [bool](Get-Process -Id $grandPid -ErrorAction SilentlyContinue)
+      if ($childGone -and $grandGone) { break }
+      Start-Sleep -Milliseconds 100
+    }
+    Assert-True $childGone 'bounded wait: the timed-out child is gone'
+    Assert-True $grandGone 'bounded wait: the grandchild is gone too (tree kill, not just the direct child)'
+
+    # --- tree kill takes descendants, and only them -----------------------
+    $keepDir = Join-Path $treeDir 'keep'
+    New-Item -ItemType Directory -Path $keepDir -Force | Out-Null
+    $keeper = Start-HiddenPowerShell -ScriptPath (Join-Path $treeDir 'grandchild.ps1') -ArgumentList @('-MarkerDir', $keepDir)
+    $keeperPid = $keeper.Id
+    $snapshot = Get-ProcessSnapshot
+    Assert-True ($null -ne $snapshot) 'snapshot: Win32_Process is readable for the caller own processes'
+    if ($null -ne $snapshot) {
+      $order = Get-ProcessTreeOrder -RootId $keeperPid -ParentMap (Get-ProcessParentMap -Snapshot $snapshot)
+      Assert-Equal ($order[$order.Count - 1]) $keeperPid 'snapshot: the root is killed last'
+      $killed = Stop-ProcessTree -RootId $keeperPid -Snapshot $snapshot
+      Assert-True ($killed.Stopped -ge 1) 'tree kill: reports at least one stopped process'
+      Assert-True $killed.Exited 'tree kill: the root is gone afterwards'
+    } else {
+      try { $keeper.Kill() } catch { }
+    }
+
+
     # --- VBS entry --------------------------------------------------------
     $cscript = Join-Path $env:SystemRoot 'System32\cscript.exe'
     $wscript = Join-Path $env:SystemRoot 'System32\wscript.exe'
@@ -208,6 +345,9 @@ param([string]$OutPath, [string]$Label)
     Assert-True ($errorText -notmatch 'WindowStyle Hidden') 'missing helper does not fall back to a console window'
   }
 } finally {
+  foreach ($stray in $script:StrayPids) {
+    if ($stray -gt 0) { try { Stop-Process -Id $stray -Force -ErrorAction SilentlyContinue } catch { } }
+  }
   Remove-Item -LiteralPath $Temp -Recurse -Force -ErrorAction SilentlyContinue
 }
 

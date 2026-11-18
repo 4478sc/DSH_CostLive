@@ -24,8 +24,12 @@ if (Test-Path (Join-Path $Repo 'config/vm-dashboard.local.json')) {
   $helper = Join-Path $PSScriptRoot 'hidden-launch.ps1'
   if (-not (Test-Path $helper)) { throw ('Missing windowless launcher helper: ' + $helper) }
   . $helper
-  $run = Start-HiddenPowerShell -ScriptPath $dashboard -ArgumentList @('-Ensure') -Wait
+  # Bounded: a scheduled task must not sit for ever behind a supervisor that is
+  # itself stuck. The timeout path kills the whole tree (including ssh/scp
+  # children) instead of only the direct child.
+  $run = Start-HiddenPowerShell -ScriptPath $dashboard -ArgumentList @('-Ensure') -Wait -TimeoutSeconds 120
   if ($null -eq $run.ExitCode) { exit 1 }
+  if ($run.TimedOut) { throw 'vm-dashboard -Ensure did not finish within 120 s' }
   exit ([int]$run.ExitCode)
 }
 

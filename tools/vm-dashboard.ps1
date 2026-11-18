@@ -4,6 +4,16 @@
 # this chain through tools/launch-hidden.vbs. '-WindowStyle Hidden' alone still
 # showed a Windows Terminal window on the measured host; see
 # docs/host-sync-windowless.md for the measurement and the regression tests.
+#
+# Watchdog (2026-11-19): the supervisor used to probe the uploader's mutex only,
+# and it blocked for hours inside the SSH forward, so a loop stuck on a hung
+# ssh.exe kept the mutex held and nothing ever noticed. It now waits for the
+# forward in bounded slices and, between slices, judges the uploader by its
+# heartbeat file: fresh -> leave it alone; stale while the mutex is still held
+# -> verify pid + start time + command line, kill that tree, restart; no
+# heartbeat yet -> wait out the startup grace first. Thresholds come from
+# Get-HeartbeatPolicy, so they always stay above the upload's own bound. See
+# docs/host-sync-watchdog.md.
 [CmdletBinding()]
 param([switch]$Ensure, [switch]$Open)
 $ErrorActionPreference = 'Stop'
@@ -24,6 +34,46 @@ if (-not (Test-Path $Key) -or -not (Test-Path $PushLoop)) { throw 'SSH key or ho
 $Helper = Join-Path $PSScriptRoot 'hidden-launch.ps1'
 if (-not (Test-Path $Helper)) { throw ('Missing windowless launcher helper: ' + $Helper) }
 . $Helper
+
+function Get-ConfigValue([string]$Name, $Default) {
+  if ($null -eq $Config.PSObject.Properties[$Name]) { return $Default }
+  $value = $Config.PSObject.Properties[$Name].Value
+  if ($null -eq $value) { return $Default }
+  if ($value -is [string] -and [string]::IsNullOrWhiteSpace($value)) { return $Default }
+  return $value
+}
+
+# Optional watchdog settings. heartbeatPath is the only one a deployment must
+# add; without it the supervisor keeps the old mutex-only behaviour.
+$UploadTimeoutSeconds = [int](Get-ConfigValue 'uploadTimeoutSeconds' 120)
+if ($UploadTimeoutSeconds -lt 10) { $UploadTimeoutSeconds = 10 }
+$HeartbeatPath = [string](Get-ConfigValue 'heartbeatPath' '')
+if (-not [string]::IsNullOrWhiteSpace($HeartbeatPath)) {
+  $HeartbeatPath = [Environment]::ExpandEnvironmentVariables($HeartbeatPath)
+  if (-not [IO.Path]::IsPathRooted($HeartbeatPath)) { $HeartbeatPath = [IO.Path]::GetFullPath((Join-Path $Repo $HeartbeatPath)) }
+}
+$PolicyArgs = @{
+  OperationTimeoutSeconds = $UploadTimeoutSeconds
+  IntervalSeconds         = 20
+  MarginSeconds           = 30
+  StaleSeconds            = [int](Get-ConfigValue 'heartbeatStaleSeconds' 0)
+  StartupGraceSeconds     = [int](Get-ConfigValue 'startupGraceSeconds' 0)
+}
+$Policy = Get-HeartbeatPolicy @PolicyArgs
+$MinSecondsBetweenRestarts = [int](Get-ConfigValue 'minSecondsBetweenRestarts' 60)
+$WatchdogTickSeconds = [int](Get-ConfigValue 'watchdogTickSeconds' 20)
+
+$script:HeartbeatEnabled = -not [string]::IsNullOrWhiteSpace($HeartbeatPath)
+$script:HeartbeatPath = $HeartbeatPath
+$script:StaleSeconds = [int]$Policy.StaleSeconds
+$script:StartupGraceSeconds = [int]$Policy.StartupGraceSeconds
+$script:MinSecondsBetweenRestarts = $MinSecondsBetweenRestarts
+$script:PushLoop = $PushLoop
+$script:UploadLoopPattern = [regex]::Escape((Split-Path -Leaf $PushLoop))
+$script:SupervisorStartedAt = Get-Date
+$script:LastUploaderStartAt = $null
+$script:LastWatchdogAction = ''
+
 $Out = Join-Path $Repo 'out'
 New-Item -ItemType Directory -Force $Out | Out-Null
 $Lock = Join-Path $Out 'vm-dashboard.pid'
@@ -65,6 +115,82 @@ function Write-Log([string]$Text) {
   } catch { }
 }
 
+# One decision per tick, with the state the decision needs. Mutex-only healing
+# remains for deployments that configure no heartbeat file.
+function Invoke-UploaderWatchdog {
+  $mutex = Test-UploaderRunning
+  if (-not $script:HeartbeatEnabled) {
+    if ($mutex -eq $false) {
+      if (Start-Uploader) {
+        $script:LastUploaderStartAt = Get-Date
+        Write-Log 'uploader started (mutex absent)'
+      }
+    }
+    return
+  }
+  $heartbeat = Read-Heartbeat -Path $script:HeartbeatPath
+  $sinceRestart = -1.0
+  if ($null -ne $script:LastUploaderStartAt) { $sinceRestart = ((Get-Date) - $script:LastUploaderStartAt).TotalSeconds }
+  $supervisorAge = ((Get-Date) - $script:SupervisorStartedAt).TotalSeconds
+  $decisionArgs = @{
+    MutexPresent             = ($mutex -eq $true)
+    Heartbeat                = $heartbeat
+    StaleSeconds             = $script:StaleSeconds
+    StartupGraceSeconds      = $script:StartupGraceSeconds
+    SupervisorAgeSeconds     = $supervisorAge
+    SinceLastRestartSeconds  = $sinceRestart
+    MinSecondsBetweenRestarts = $script:MinSecondsBetweenRestarts
+  }
+  $decision = Test-WatchdogAction @decisionArgs
+  if ($decision.Action -eq 'none' -and $decision.Action -ne $script:LastWatchdogAction) {
+    Write-Log ('watchdog: ' + $decision.Reason)
+  }
+  $script:LastWatchdogAction = $decision.Action
+  if ($decision.Action -eq 'reclaim') {
+    if ([int]$heartbeat.Pid -le 0 -or $null -eq $heartbeat.StartedAt) {
+      Write-Log ('watchdog: ' + $decision.Reason + '; heartbeat records no pid/start time, not killing anything')
+      return
+    }
+    $snapshot = Get-ProcessSnapshot
+    if ($null -eq $snapshot) {
+      Write-Log ('watchdog: ' + $decision.Reason + '; process snapshot unavailable, not killing anything')
+      return
+    }
+    $actual = Get-ProcessIdentity -ProcessId ([int]$heartbeat.Pid) -Snapshot $snapshot
+    $expected = [pscustomobject]@{ Pid = [int]$heartbeat.Pid; StartedAt = $heartbeat.StartedAt; Name = '' }
+    if (-not (Test-ProcessIdentity -Expected $expected -Actual $actual -CommandLinePattern $script:UploadLoopPattern)) {
+      Write-Log ('watchdog: ' + $decision.Reason + '; pid ' + $heartbeat.Pid + ' no longer matches the recorded upload loop (recycled pid?), not killing anything')
+      return
+    }
+    $killed = Stop-ProcessTree -RootId ([int]$heartbeat.Pid) -Snapshot $snapshot
+    Write-Log ('watchdog: ' + $decision.Reason + '; reclaimed pid=' + $heartbeat.Pid + ' killed=' + $killed.Stopped + ' exited=' + $killed.Exited)
+    $released = $false
+    for ($i = 0; $i -lt 60; $i += 1) {
+      if ((Test-UploaderRunning) -eq $false) { $released = $true; break }
+      Start-Sleep -Milliseconds 100
+    }
+    if (-not $released) {
+      Write-Log 'watchdog: uploader mutex still held after reclaim; next tick retries'
+      return
+    }
+    if (Start-Uploader) {
+      $script:LastUploaderStartAt = Get-Date
+      Write-Log 'uploader started (after reclaim)'
+    }
+    return
+  }
+  if ($decision.Action -eq 'restart') {
+    if ($mutex -ne $false) {
+      Write-Log ('watchdog: ' + $decision.Reason + '; mutex probe says ' + [string]$mutex + ', waiting')
+      return
+    }
+    if (Start-Uploader) {
+      $script:LastUploaderStartAt = Get-Date
+      Write-Log ('uploader started (' + $decision.Reason + ')')
+    }
+  }
+}
+
 # The existing push loop has its own mutex and remains the only session uploader.
 # Forward retry backoff: 5, 10, 20, 40, 60 s capped (Get-NextRetryDelay); a
 # forward that stayed up for at least a minute resets the ramp. The old loop
@@ -84,19 +210,22 @@ $SshArgs = @(
 $SshCommandLine = ($SshArgs | ForEach-Object { ConvertTo-NativeArgument $_ }) -join ' '
 
 try {
-  Write-Log ('supervisor start pid=' + $PID)
+  $watchdogState = 'watchdog=mutex-only'
+  if ($script:HeartbeatEnabled) {
+    $watchdogState = ('watchdog=heartbeat path=' + $script:HeartbeatPath + ' stale=' + $script:StaleSeconds + 's grace=' + $script:StartupGraceSeconds + 's uploadTimeout=' + $UploadTimeoutSeconds + 's')
+  }
+  Write-Log ('supervisor start pid=' + $PID + ' ' + $watchdogState)
   while ($true) {
-    # Heal the uploader only when its mutex says it is really gone.
-    if (-not (Test-UploaderRunning)) {
-      [void](Start-HiddenPowerShell -ScriptPath $PushLoop)
-      Write-Log 'uploader restarted (mutex absent)'
-    }
+    Invoke-UploaderWatchdog
     $Listener = Get-NetTCPConnection -LocalPort 4173 -State Listen -ErrorAction SilentlyContinue
     if ($Listener) { Write-Log 'port 4173 busy; refusing to replace an unrelated service'; Start-Sleep -Seconds 15; continue }
     $startedAt = Get-Date
     $exit = $null
     try {
-      $run = Start-HiddenProcess -FilePath $Ssh -Arguments $SshCommandLine -Wait
+      # Not -Wait: a bounded slice lets the watchdog run while a long-lived
+      # forward keeps running (a -Wait with no slice is what hid the stall).
+      $proc = Start-HiddenProcess -FilePath $Ssh -Arguments $SshCommandLine
+      $run = Wait-HiddenProcessExit -Process $proc -TickSeconds $WatchdogTickSeconds -OnTick { Invoke-UploaderWatchdog }
       $exit = $run.ExitCode
     } catch {
       Write-Log ('ssh launch failed: ' + $_.Exception.Message)

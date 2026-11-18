@@ -152,6 +152,13 @@ opencode.ai 控制台 ──虚拟机每 60 s 拉取──▶ ~/.opencode-usage/
   [docs/host-sync-windowless.md](docs/host-sync-windowless.md)。
 - 同步循环的 `fetch` 带 30 秒超时，锁文件用 `/proc/<pid>/cmdline` 确认持有者真的是同步进程，
   避免「进程还在但不干活」和「重启后 pid 复用把循环挡住」两种假死。
+- 宿主机侧的每次上传都有上界：推送循环用 `-TimeoutSeconds` 等它，超时按失败退避，并把整棵子进程树
+  （`ssh.exe` / `scp.exe`）一起收掉，而不是只结束直接子进程——挂住的那条连接正是靠互斥量把看护骗过去的。
+- 心跳看护：上传循环每一轮写一行心跳（带自己的 pid 与启动时间），`tools/vm-dashboard.ps1` 在等 SSH 转发的
+  空隙里按心跳判活——心跳新鲜就不动；超过「上传上界 + 间隔 + 余量」且互斥量仍被持有，才先核对 pid、启动时间与
+  命令行，确认还是同一个上传进程，再结束整棵树并重启。刚启动或刚重启过的窗口内不动作，避免连锁重启。
+  阈值由 `Get-HeartbeatPolicy` 推导，永远高于上传上界。时间线、接法与回滚见
+  [docs/host-sync-watchdog.md](docs/host-sync-watchdog.md)。
 
 > 旧的主机侧拉取模式（`tools/sync-vm-dsh.ps1` + `.dsh-vm/`）仍然保留，适合只想在一台机器上看两边数据的情况。
 
@@ -518,6 +525,7 @@ Node 22 的测试进程隔离开关仍叫 `--experimental-test-isolation`，所�
 | [`docs/DSH-TOKEN-ACCOUNTING.md`](docs/DSH-TOKEN-ACCOUNTING.md) | DSH 如何统计 token（事件、投影、替换/重试规则） |
 | [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) | 开发笔记：坑位、调试命令、验收清单、后续想法 |
 | [`docs/host-sync-windowless.md`](docs/host-sync-windowless.md) | 主机→VM 同步链无窗口化：根因、调用链、计划任务接法、回滚、回归测试与实测证据 |
+| [`docs/host-sync-watchdog.md`](docs/host-sync-watchdog.md) | 主机→VM 上传的超时上界、进程树收尾、心跳看护：故障时间线、接法与配置、回滚、回归测试 |
 
 ---
 

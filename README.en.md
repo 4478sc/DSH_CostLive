@@ -160,6 +160,16 @@ opencode.ai console ──VM polls every 60 s──▶ ~/.opencode-usage/request
   Root cause, rollback and regression tests: [docs/host-sync-windowless.md](docs/host-sync-windowless.md).
 - The sync loop's `fetch` has a 30 s timeout, and the lock file is validated through `/proc/<pid>/cmdline` so
   "process alive but idle" and "pid reused after a restart" cannot wedge it.
+- Every host-side upload is bounded: the push loop waits for it with `-TimeoutSeconds`, a timeout takes the
+  failure path with backoff, and the timeout reclaims the whole process tree (`ssh.exe` / `scp.exe`) instead of
+  only the direct child — the hanging connection is exactly what used to fool the watchdog through the mutex.
+- Heartbeat watchdog: the push loop writes one heartbeat line per iteration (its own pid and start time) and
+  `tools/vm-dashboard.ps1` judges liveness between the SSH forward's wait slices — a fresh heartbeat is left alone;
+  only when it is older than "upload bound + interval + margin" **and** the mutex is still held does the supervisor
+  verify pid, start time and command line, kill that tree and restart. Nothing happens during the startup grace or
+  the restart backoff, so a permanent failure cannot turn into a restart storm. The thresholds come from
+  `Get-HeartbeatPolicy` and always stay above the upload bound. Timeline, wiring and rollback:
+  [docs/host-sync-watchdog.md](docs/host-sync-watchdog.md).
 
 > The older host-side pull mode (`tools/sync-vm-dsh.ps1` + `.dsh-vm/`) is still supported when you just want
 > both machines' data on one box.
@@ -577,6 +587,7 @@ More troubleshooting in [`LIVE.md`](LIVE.md).
 | [`docs/DSH-TOKEN-ACCOUNTING.md`](docs/DSH-TOKEN-ACCOUNTING.md) | How DSH counts tokens (events, projections, replacement/retry rules) |
 | [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) | Development notes: pitfalls, debugging commands, acceptance checklist, ideas |
 | [`docs/host-sync-windowless.md`](docs/host-sync-windowless.md) | Windowless host→VM sync chain: root cause, call chain, task wiring, rollback, regression tests, measured evidence |
+| [`docs/host-sync-watchdog.md`](docs/host-sync-watchdog.md) | Bounded host→VM uploads, process-tree cleanup, heartbeat watchdog: failure timeline, wiring and config, rollback, regression tests |
 
 ---
 

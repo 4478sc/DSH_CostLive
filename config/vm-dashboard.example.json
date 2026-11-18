@@ -2,5 +2,11 @@
   "host": "192.0.2.10",
   "user": "ubuntu",
   "keyPath": "%USERPROFILE%/.ssh/id_ed25519",
-  "pushLoop": "../dsh-cost/vm/push-loop.ps1"
+  "pushLoop": "../dsh-cost/vm/push-loop.ps1",
+  "heartbeatPath": "../dsh-cost/vm/state/push-loop.heartbeat",
+  "uploadTimeoutSeconds": 120,
+  "heartbeatStaleSeconds": 0,
+  "startupGraceSeconds": 0,
+  "minSecondsBetweenRestarts": 60,
+  "watchdogTickSeconds": 20
 }

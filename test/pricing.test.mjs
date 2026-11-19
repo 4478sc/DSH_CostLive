@@ -3,15 +3,18 @@ import assert from 'node:assert/strict';
 import {
   DEFAULT_PRICING,
   DEFAULT_PRICING_PATH,
+  DEFAULT_USD_PRICING_PATH,
   costCny,
   costMicroCny,
   describePeakHours,
   formatCny,
   isPeak,
   loadPricing,
+  loadUsdPricing,
   normalizePricing,
   priceAt,
   resolvePrice,
+  resolveUsdPrice,
 } from '../src/pricing.mjs';
 
 const PRICING = normalizePricing({
@@ -111,6 +114,29 @@ test('prices the shipped DeepSeek V4.1 Flash entry and its official aliases', ()
 
 test('the built-in fallback table matches config/pricing.json', () => {
   assert.deepEqual(normalizePricing(DEFAULT_PRICING), loadPricing(DEFAULT_PRICING_PATH));
+});
+
+test('the shipped USD table prices the GPT-6.2 rows and leaves unverified variants unpriced', () => {
+  const usd = loadUsdPricing(DEFAULT_USD_PRICING_PATH);
+  assert.deepEqual([...usd.providers], ['codex', 'openai', 'host-codex']);
+  const rates = (id) => {
+    const price = usd.models[id];
+    return [price.input, price.output, price.cacheWrite, price.cacheRead];
+  };
+  // Rows that existed before keep their rates.
+  assert.deepEqual(rates('gpt-6.1-sol'), [2, 10, 2.5, 0.1]);
+  assert.deepEqual(rates('gpt-6-luna'), [0.1, 0.5, 0.125, 0.01]);
+  // GPT-6.2 standard (<=272K) list rates, corroborated by two public sources on 2026-11-19.
+  assert.deepEqual(rates('gpt-6.2-sol'), [2, 10, 2.5, 0.1]);
+  assert.deepEqual(rates('gpt-6.2-astra'), [8, 40, 10, 0.4]);
+  // A dated or prefixed id reaches the same row through the normal lookup.
+  assert.equal(resolveUsdPrice('openai/gpt-6.2-sol-20261117', usd)?.key, 'gpt-6.2-sol');
+  // Variants with no published row stay unpriced instead of borrowing a sibling rate.
+  for (const id of ['gpt-6.2-sol-pro', 'gpt-6.2-astra-pro', 'gpt-6.2-terra']) {
+    assert.equal(resolveUsdPrice(id, usd), null, id);
+  }
+  // Adding USD rows must not make them resolvable from the CNY table.
+  assert.equal(resolvePrice('gpt-6.2-sol', loadPricing(DEFAULT_PRICING_PATH)), null);
 });
 
 test('a two-tier price picks its tier from the sample clock', () => {

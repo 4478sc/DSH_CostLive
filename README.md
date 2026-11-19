@@ -348,13 +348,19 @@ cost = (未缓存输入 × input + 输出 × output + 缓存写 × cacheWrite + 
 | 模型 | 输入（未缓存） | 输出 | 缓存写 | 缓存读 |
 |---|---:|---:|---:|---:|
 | `gpt-6.1-sol` | 2 | 10 | 2.5 | 0.1 |
+| `gpt-6.2-sol` | 2 | 10 | 2.5 | 0.1 |
+| `gpt-6.2-astra` | 8 | 40 | 10 | 0.4 |
 | `gpt-6-luna` | 0.1 | 0.5 | 0.125 | 0.01 |
 
 - `providers` 列出哪些提供方走这张表；命中的行只记美元（`costMicroCny` 保持 0），
   `priceKey` 为 `usd-<模型>`，与 CNY 行一样参与「Token均价」的美元侧。
 - 同一服务的多条路由合并成一行：`codex` / `openai` / `host-codex` → `codex`，
   `opencode` / `opencode-go` → `opencode`（`src/pricing.mjs` 的 `canonicalProvider`）。
-- 官方价目里的长上下文加价（>272k prompt tokens 的 2× 输入 / 1.5× 输出）未建模。
+- 官方价目里的长上下文加价（>272k prompt tokens 的 2× 输入 / 1.5× 输出）未建模；
+  `gpt-6.2` 两行只取 ≤272K 的标准档，其 >272K 档（`gpt-6.2-sol` 4 / 15 / 5 / 0.2、
+  `gpt-6.2-astra` 16 / 60 / 20 / 0.8）不并入单一行，超长请求会按标准档少算。
+- 出处：OpenRouter 模型目录（2026-11-11）；`gpt-6.2` 两行于 2026-11-19 用 OpenRouter 的 OpenAI
+  标准端点与 AICodeMirror 公开 `model-pricing` API 双向核对，逐个字段一致。
 - 自定义：`--usd my-usd-pricing.json`；文件不存在时视为「没有美元价表」，不会报错。
 
 ---

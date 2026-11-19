@@ -403,6 +403,8 @@ Some providers are billed from the OpenAI API list price in USD, for example `co
 | Model | Input (uncached) | Output | Cache write | Cache read |
 |---|---:|---:|---:|---:|
 | `gpt-6.1-sol` | 2 | 10 | 2.5 | 0.1 |
+| `gpt-6.2-sol` | 2 | 10 | 2.5 | 0.1 |
+| `gpt-6.2-astra` | 8 | 40 | 10 | 0.4 |
 | `gpt-6-luna` | 0.1 | 0.5 | 0.125 | 0.01 |
 
 - `providers` lists the providers covered by this table; matching rows record USD only (`costMicroCny` stays 0)
@@ -410,7 +412,11 @@ Some providers are billed from the OpenAI API list price in USD, for example `co
 - Several routes of the same service fold into one row: `codex` / `openai` / `host-codex` → `codex`,
   `opencode` / `opencode-go` → `opencode` (`canonicalProvider` in `src/pricing.mjs`).
 - The long-context surcharge from the official price list (2× input / 1.5× output above 272k prompt tokens) is
-  not modelled.
+  not modelled. The two `gpt-6.2` rows therefore carry only their standard (≤272K) rates; their >272K rows
+  (`gpt-6.2-sol` 4 / 15 / 5 / 0.2, `gpt-6.2-astra` 16 / 60 / 20 / 0.8) are not folded into one blended number, so
+  a request above the threshold is billed low.
+- Source: the OpenRouter model catalog (2026-11-11); both `gpt-6.2` rows were re-verified on 2026-11-19 against
+  the OpenRouter OpenAI standard endpoint and the public AICodeMirror `model-pricing` API, field for field.
 - Custom table: `--usd my-usd-pricing.json`; a missing file simply means "no USD table" and is not an error.
 
 ---

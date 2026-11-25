@@ -58,17 +58,23 @@ collect / price / render code as the report, so page numbers always match the CL
 
 ---
 
-## Real price (subscription amortization)
+## Real price (per-payment subscription amortization)
 
-Open "Billing settings", enter monthly OpenCode and Codex subscriptions in USD with effective dates, and save. Then use the "Usage pricing / Real price" buttons above the editor to switch instantly without saving again. Mode changes never save unsubmitted price-history edits. Each provider needs at least one record; use 0 for no subscription, not a blank. The first record may start partway through a month; subsequent price changes must take effect on the first of a month. Mid-month upgrades, refunds and shifted renewal cycles are not modeled. Each rate continues until the next record; add a zero-price record at a month boundary to pause it.
+Open "Billing settings" and record each OpenCode and Codex subscription or renewal: **every record is one single-period payment** in USD with its start date. Then use the "Usage pricing / Real price" buttons above the editor to switch instantly without saving again; mode changes never save unsubmitted edits. Each provider needs at least one record; use 0 for no subscription, not a blank. Any calendar day is a valid start (mid-month included), same-price renewals are ordinary records, and existing records are never copied into invented renewals.
 
-- Daily fixed cost = monthly fee / actual days in that month (28/29/30/31). Today counts in full; future days do not. Rounded cumulative micro-USD day shares reconcile exactly to a full month's fee.
+- **One record = one period**: from its start date (inclusive) through the same day next month (inclusive). That period's day count is the amortization denominator. When the next month has no such day the period is clamped to its last day: `Jan 31 → Feb 28` (`Feb 29` in a leap year), `Mar 31 → Apr 30`.
+- **Renewal on the expiry day**: another record of the same provider starting that day drops the day from the old period, so the day is charged only by the new period (which runs to the same day of the following month).
+- **Renewal after the expiry day**: the old period still includes the expiry day; the gap between the expiry day and the new start date is free.
+- **No renewal**: once a period ends nothing more is charged — **nothing renews implicitly**.
+- **Renewal before the expiry day**: to avoid charging one provider twice, the old period ends the day before the new start, and its payment is still spread over exactly the days it covers (so its daily rate rises); the new period starts on its own date. Only same-provider records truncate a period, never another provider's records.
+- Daily amount = that payment ÷ the period's full covered day count. The denominator never shrinks with the selected range or with "today"; today counts in full and future days are not charged. Cumulative rounded micro-USD shares make a whole period add up to the amount paid exactly, so display rounding never decides a total.
 - Today / 7 days / 30 days / All time use **Asia/Shanghai** sample dates, not session creation dates. Days without tokens still incur subscription cost, reported as idle cost.
-- Host and VM usage is combined by provider before charging each subscription once. Subscription cost replaces OpenCode/Codex console/list prices rather than adding to them. Native log tokens do not depend on timely console archives.
+- Host and VM usage is combined by provider before charging each payment once. Subscription cost replaces OpenCode/Codex console/list prices rather than adding to them. Native log tokens do not depend on timely console archives.
 - Real-price daily costs initially show the latest 7 days. Each "Show more" adds 7 days; "Show less" returns to the first page. Live refresh preserves the expanded page count; pagination never changes totals.
 - Real mode reports provider totals, daily costs and effective price per million tokens, with **no model or session allocation**. The overall USD average includes idle cost and divides by four-bucket tokens in the configured USD scope; no tokens means "—". CNY/USD are never converted.
-- Usage before a subscription's effective date is marked incomplete, not backfilled at the current rate. Undated tokens are disclosed separately and excluded from daily costs/averages.
+- Usage before a subscription's effective date is marked incomplete, not backfilled at the current rate. Gap days belong to no period: they cost nothing and are not reported as incomplete. Undated tokens are disclosed separately and excluded from daily costs/averages.
 - Settings live in the backend’s git-ignored config/billing.local.json. In a VM deployment, host localhost:4173 forwards over SSH to the VM: both entries share one backend and settings. The existing host SSH uploader transfers usage automatically. Deployments must preserve this file.
+- The meaning changed from "a monthly fee stays in force" to "one payment per subscription or renewal": existing dates and amounts are read as they are, never auto-copied into a renewal chain, and the real configuration file is never rewritten. To pause a subscription, simply stop adding records after it expires; a zero-price record is still valid as a placeholder (that period costs 0).
 - The mode is saved server-side; the web page, CLI and JSON/CSV use the same calculator. JSON referenceUsage contains reference prices only and does not contribute to real totals; top-level sessions is empty because session costs are not allocated.
 - An open settings editor is protected from polling fragment replacement; close it to resume. Static HTML supports viewing, not saving settings; edit through the live service or regenerate it.
 
@@ -76,7 +82,9 @@ Both CLI entry points accept --billing <file> and --billing-mode usage|real. In 
 
 Settings writes require a **loopback connection**, same-origin JSON PUT /api/billing and X-CostLive-Settings: 1. LAN access is read-only: CSRF checks are not authentication. Use an SSH local port forward and localhost for remote administration; never expose the unauthenticated report service publicly. The endpoint only writes local CostLive settings, never DSH logs or credentials.
 
-See [billing.example.json](config/billing.example.json) for example prices. For a VM frontend, copy config/vm-dashboard.example.json to ignored config/vm-dashboard.local.json and set the SSH target, key path and existing host push-loop script. The dsh-cost-live.cmd launcher starts a reconnecting SSH forward and uploader instead of a second accounting backend; the existing ensure-host-sync watchdog uses the same mode. Port 4173 conflicts are reported without killing unrelated processes. Example prices are not your actual fees.
+See [billing.example.json](config/billing.example.json): opencode's `2026-11-01` and `2026-12-01` records (both 20 USD) show a same-day renewal (11/01–11/30 and 12/01–2027/01/01), while codex's single `2026-11-15` record (100 USD) shows no renewal (11/15–12/15 inclusive, then no cost). For a VM frontend, copy config/vm-dashboard.example.json to ignored config/vm-dashboard.local.json and set the SSH target, key path and existing host push-loop script. The dsh-cost-live.cmd launcher starts a reconnecting SSH forward and uploader instead of a second accounting backend; the existing ensure-host-sync watchdog uses the same mode. Port 4173 conflicts are reported without killing unrelated processes. Example prices are not your actual fees.
+
+---
 
 ## Quick start
 
@@ -365,8 +373,49 @@ Both the HTML report and the live page offer the "by session / by day" toggle (s
 
 ### Price table
 
-The default table lives in [`config/pricing.json`](config/pricing.json) in **CNY per 1,000,000 tokens**.
-It only estimates CNY for **non**-opencode providers (for example claude on `aicodemirror1`);
+The dashboard no longer prints a rate table inline: its price section is **one link per provider**, and each
+link opens a separate page on the same origin in a new tab (`target="_blank" rel="noopener noreferrer"`; the link
+carries only the provider id, never a session id, title or workspace). A live page swaps its body every 20 seconds
+and rebuilds the links with it, so they keep working; `--once` / `--watch` and `dsh-cost report --format html`
+write `pricing-<id>.html` companion pages next to the report and switch the links to relative paths:
+
+| Provider | Price page | Basis |
+|---|---|---|
+| `aicodemirror1` | `/pricing/aicodemirror1` | four groups: USD quotes × a fixed factor → CNY |
+| `codex` (incl. `openai` / `host-codex`) | `/pricing/codex` | OpenAI USD list price, see the next section |
+| `opencode` (incl. `opencode-go`) | `/pricing/opencode` | console bill in USD, no fixed card |
+| `deepseek` | `/pricing/deepseek` | billed from the local CNY table; old rates are no longer shown |
+
+**AICodeMirror (`aicodemirror1`)** rates live in [`config/aicodemirror-pricing.json`](config/aicodemirror-pricing.json)
+as **USD per 1,000,000 tokens** and are booked in CNY: `CNY = USD × the group factor`, converted per bucket and
+rounded to 6 decimals.
+
+| Group | Factor | Published tiers |
+|---|---:|---|
+| ClaudeCode | 1.15 | standard ≤272K (`claude-haiku-5-5`: ≤100K); `claude-haiku-5-5` long tier >100K |
+| Codex | 0.50 | standard ≤272K / long >272K |
+| Gemini | 0.94 | a single tier (no cache-write column) |
+| Grok | 0.43 | standard ≤200K / long >200K |
+
+- **30 models / 43 tiers** (13 of them long-context): 13 Claude + 8 Codex + 5 Gemini + 4 Grok.
+- The tier is chosen from **one request's prompt total** (uncached input + cache write + cache read), not from a
+  session total; the long tier only starts strictly above the threshold. A lone bounded tier still bills a longer
+  request at that rate, but the row is marked as an estimate instead of being reported as free.
+- `claude-haiku-5-5` follows the **user-confirmed** split at 100K: **standard up to 100K, long above 100K**.
+  The public endpoint `https://www.aicodemirror.ai/api/model-pricing` still prints standard "≤272K" and long ">100K";
+  the user confirmed 272K is wrong, so the card applies the correction and treats that endpoint text as stale. The
+  model no longer overlaps and the overlap badge disappears for it.
+- The generic guard stays: any genuinely overlapping tiers are still never guessed — they remain unpriced/pending
+  (cost 0 plus a warning) with both tiers shown side by side on the price page.
+- Gemini / Grok publish no cache-write column: the page shows `—`, billing falls back to that group's input rate,
+  and the row is marked as an estimate whenever those tokens are actually used.
+- Only `aicodemirror1` is priced from this card; the same model id on another provider keeps its own table.
+- DeepSeek billing and the official sync are unchanged; only the dashboard and the price pages stop printing its
+  old unit prices.
+
+The fallback table below still applies (DeepSeek, unlisted models, and providers without a card) but is no longer
+printed row by row in the UI. The default table lives in [`config/pricing.json`](config/pricing.json) in
+**CNY per 1,000,000 tokens**. It only estimates CNY for **non**-opencode providers without a dedicated card;
 `opencode` / `opencode-go` are always billed in USD from the console, as described above:
 
 | Model | Input (uncached) | Output | Cache write | Cache read |
@@ -477,6 +526,8 @@ DSH_CostLive/
 ├─ config/sources.json        # sources: host ~/.dsh + VM mirror .dsh-vm
 ├─ src/
 │  ├─ pricing.mjs             # table normalization, model matching, peak tiers, micro-CNY arithmetic
+│  ├─ provider-pricing.mjs    # provider card: normalization, tier pick, CNY = USD x factor
+│  ├─ pricing-pages.mjs       # provider price pages (same-origin /pricing/<id> and static companions)
 │  ├─ engine.mjs              # event fold → billed samples and four-bucket aggregation
 │  ├─ sessions.mjs            # session discovery, log reading, projection cache
 │  ├─ sources.mjs             # host/VM source resolution and labels
@@ -488,9 +539,9 @@ DSH_CostLive/
 │  ├─ report-text.mjs         # terminal tables / detail / price list
 │  ├─ report-html.mjs         # self-contained HTML report (inlined CSS/JS)
 │  ├─ live.mjs                # live document / fragment / atomic write
-│  ├─ live-server.mjs         # local HTTP server and the three APIs
+│  ├─ live-server.mjs         # local HTTP server: page, APIs and /pricing/<id>
 │  └─ live-client.js          # browser side: polling, folding, ranges, scroll restore
-├─ test/                      # node:test, 13 files, 122 cases + the Windows regression test
+├─ test/                      # node:test, 14 files, 151 cases + the Windows regression test
 ├─ tools/make-demo-home.mjs   # synthetic demo data generator
 ├─ tools/sync-vm-dsh.ps1      # incremental ~/.dsh → .dsh-vm sync from a VMware VM
 ├─ tools/vm-sync-snapshot.sh  # VM-side incremental packer
@@ -517,12 +568,12 @@ npm test
 
 | File | Cases | Coverage |
 |---|---:|---|
-| `pricing.test.mjs` | 11 | Table normalization, aliases, wildcards, peak tiers, micro-CNY precision, built-in table parity |
+| `pricing.test.mjs` | 12 | Table normalization, aliases, wildcards, peak tiers, micro-CNY precision, built-in table parity |
 | `engine.test.mjs` | 15 | Streaming replacement, retries, four-bucket merge, zero usage, model switches, opencode pending |
 | `activity.test.mjs` | 8 | `openStep` authority, `turnBoundary` fallback, dual-channel subagent detection, stable three-bucket ordering |
 | `time-range.test.mjs` | 22 | Range boundaries, missing dates, aggregation arithmetic, browser runtime, DOM events, storage fallbacks, HTML integration |
 | `daily.test.mjs` | 11 | Midnight split, unknown-time bucket, calendar boundaries, daily de-duplication, by-day DOM and storage |
-| `billing.test.mjs` | 10 | Subscription amortization, natural-month day counts, effective-date changes, shared providers, idle costs, settings API |
+| `billing.test.mjs` | 16 | Per-payment periods and expiry days, same-day/early/late renewals and gaps, month-end and leap-year clamping, cross-year, range filtering and totals, time zone, legacy configs, settings UI and API |
 | `live.test.mjs` | 6 | Collection/filtering, template splitting, atomic writes, HTTP API |
 | `opencode-usage.test.mjs` | 17 | Official row normalization, de-duplication, session overlay, window totals, cache saving, 401/403 hints, `--check-auth` |
 | `i18n.test.mjs` | 5 | Locale tags, placeholder substitution, identical key sets and placeholders per locale |
@@ -530,7 +581,8 @@ npm test
 | `sessions.test.mjs` | 2 | Session discovery and reading |
 | `zstd.test.mjs` | 2 | Multi-frame decompression, plain JSONL fallback |
 | `parent-session.test.mjs` | 10 | Parent id normalization, per-source resolution, parent outside the range, nested parents, missing/untitled fallbacks, role markers in both views, HTML escaping, dataset fields |
-| **Total (`npm test`)** | **122** | |
+| `provider-pricing.test.mjs` | 22 | Full AICodeMirror transcription (30 models / 43 tiers), four factors, provider isolation, 272K/200K and cache-bucket boundaries, ambiguous overlap, no double booking, price pages/links/static companions/escaping |
+| **Total (`npm test`)** | **151** | |
 
 `npm run test:ps` adds 45 Windows-targeted regression cases: windowless start (GUI host + CREATE_NO_WINDOW),
 argument quoting with spaces and quotes, the single-instance mutex, the offline retry ramp, the VBS entry point and

@@ -54,17 +54,23 @@ DSH 会把每个会话的完整事件流写进 `~/.dsh/sessions/` 下的 zstd �
 
 ---
 
-## 真实价格（订阅摊销）
+## 真实价格（逐笔订阅摊销）
 
-在实时页打开「计费设置」，填写 OpenCode 和 Codex 的月订阅费用（USD）与生效日期并保存。之后可使用设置上方的「当前计费方式 / 真实价格」按钮一键切换，无需再次保存，切换不会保存尚未提交的月费编辑。每个提供方至少一条记录；没有订阅请填 0，空白不代表免费。首条记录可从月中某日起算；后续价格记录必须从某月 1 日生效，不处理月中升级、退款或续费周期偏移。上一条价格持续生效，直到下一条记录；暂停可在月初添加 0 美元记录。
+在实时页打开「计费设置」，为 OpenCode 和 Codex 各填写订阅/续费记录：**每条记录是一笔单期实付**（USD）及其生效日，保存后可用设置上方的「当前计费方式 / 真实价格」按钮一键切换，切换不会保存尚未提交的编辑。每个提供方至少一条记录；没有订阅请填 0，空白不代表 0。可补录任意有效日（含月中），同价续费照常录入；已有记录不会被自动复制或续写。
 
-- 日固定费用 = 月费 / 当月实际天数（28/29/30/31）；今天计完整一天，未来日期不计。微美元舍入按累计日份额求差，完整月份精确等于月费。
+- **一条记录 = 一个有效期**：从生效日（含）到次月同日（含），该有效期天数就是摊销分母。次月没有同号日就截到月末：`1/31 → 2/28`（闰年 `2/29`）、`3/31 → 4/30`。
+- **到期日当天续费**：同一提供方再录一笔同一天生效的记录，旧期不含这天，该日只算新期；新期从该日到再下月同日。
+- **到期日之后才续费**：旧期仍包含到期日，到期日与新记录生效日之间的空档日不计费。
+- **不续费**：到期后没有新记录就不产生费用，**不会隐式续期**。
+- **到期日之前续费**：为避免同一提供方重复计费，旧期截到新期生效日前一天，旧费仍全额摊到它实际覆盖的那些天（日均因此变高），新期从自身生效日算起；只用同一提供方的记录截断，不会用另一提供方的记录。
+- 日额 = 该笔实付 ÷ 该期实际覆盖的完整天数，**不随筛选区间或「今天」缩短分母**；今天计完整一天，未来日期不计。微美元按累计日份额四舍五入求差，整期合计精确等于实付金额，UI 的显示舍入不决定总额。
 - 统一按 **Asia/Shanghai** 采样日期统计 Today / 7 天 / 30 天 / All time；不沿用会话创建日期。即使某天无 token，也收取订阅日额并显示闲置费用。
 - 宿主机与 VM 数据先按提供方合并，每份订阅只计一次。OpenCode/Codex 的原官网/价表费用被替换，而非叠加；使用原生日志 token，不依赖官网归档及时到达。
 - 真实模式按天费用首屏显示最近 7 天，每点一次「显示更多」增加 7 天，展开后可一键「收起」；实时刷新保留展开页数，折叠不影响费用总计。
 - 真实模式只显示提供方总费用、按天费用和每百万 token 均价，**不向模型或会话分摊**。整体 USD 均价含闲置订阅费，分母是对应已配置 USD 范围的四桶 token；无 token 显示「—」。CNY/USD 不折算。
-- 生效日期以前的用量会标为费用不完整，不按当前价格回填；无有效采样日期的 token 单独提示且不进入按日费用/均价。
+- 生效日期以前的用量会标为费用不完整，不按当前价格回填；空档日不属于任何有效期，既不计费也不报「不完整」；无有效采样日期的 token 单独提示且不进入按日费用/均价。
 - 配置保存在后端 git 忽略的 config/billing.local.json 中。VM部署使用同一个后端：宿主机 localhost:4173 经SSH转发到VM，虚拟机入口与它共用设置；宿主机用量由既有SSH推送循环自动上传，无需手工搬运配置。部署时不得覆盖该文件。
+- 语义已从「月费一直生效」变为「逐笔订阅/续费」：旧配置的日期与金额按原样读取，不会自动复制成续费链，也不会改写真实配置。要暂停订阅，到期后不再添加记录即可；需要占位时可录入 0 美元记录（该期费用为 0）。
 - 模式保存在服务端，网页、CLI、JSON/CSV 使用同一计算函数。原参考金额位于 JSON 的 referenceUsage 中，不计入真实总费用；真实模式顶层 sessions 为空，明确不提供会话费用。
 - 打开设置编辑器时后台片段不会覆盖未保存的表单；关闭后恢复。静态 HTML 仅查看，不能保存配置，需要在实时服务修改或重新生成。
 
@@ -72,7 +78,9 @@ CLI 两个入口都支持 --billing <file> 和 --billing-mode usage|real；真�
 
 设置写入仅接受**回环连接**上的同源 JSON PUT /api/billing，并要求 X-CostLive-Settings: 1；局域网只读，不把 CSRF 检查误当作认证。远程管理请使用 SSH 本地端口转发后访问 localhost；不要把未鉴权的报告服务暴露到公网。该接口只改 CostLive 本地设置，不写 DSH 日志/凭据。
 
-示例配置见 [billing.example.json](config/billing.example.json)。VM前端模式：复制 config/vm-dashboard.example.json 为被忽略的 config/vm-dashboard.local.json，填写SSH目标、密钥路径与既有宿主机push-loop脚本路径。双击 dsh-cost-live.cmd 会启动可重连的SSH转发及上传循环，不启动第二个计费后端；已有 ensure-host-sync 看门狗也复用此模式。若4173端口被其他服务占用会报冲突，不会擅自终止进程。示例金额不代表你的真实订阅费。
+示例配置见 [billing.example.json](config/billing.example.json)：opencode 的 `2026-11-01` 与 `2026-12-01` 两笔同价 20 美元演示「到期日当天续费」（分别覆盖 11/01–11/30、12/01–2027/01/01），codex 只有 `2026-11-15` 一笔 100 美元演示「不续费」（覆盖 11/15–12/15 含，之后不再计费）。VM前端模式：复制 config/vm-dashboard.example.json 为被忽略的 config/vm-dashboard.local.json，填写SSH目标、密钥路径与既有宿主机push-loop脚本路径。双击 dsh-cost-live.cmd 会启动可重连的SSH转发及上传循环，不启动第二个计费后端；已有 ensure-host-sync 看门狗也复用此模式。若4173端口被其他服务占用会报冲突，不会擅自终止进程。示例金额不代表你的真实订阅费。
+
+---
 
 ## 快速开始
 
@@ -314,8 +322,42 @@ HTML 报告与实时页都提供「按会话 / 按天」切换（存于 `localSt
 
 ### 价格表
 
+主面板不再内联价目表：价格区改为**每个提供方一个链接**，点开在新标签打开同站独立价格页
+（`target="_blank" rel="noopener noreferrer"`；链接只带提供方 id，不含会话 id、标题或工作区）。
+实时页每 20 秒整块替换正文片段，链接随片段重建，不会失效；`--once` / `--watch` 与 `dsh-cost report --format html`
+会在报告旁写出 `pricing-<id>.html` 配套页，链接自动改成相对路径：
+
+| 提供方 | 价格页 | 计价口径 |
+|---|---|---|
+| `aicodemirror1` | `/pricing/aicodemirror1` | 四组 USD 报价 × 固定倍率 → 人民币 |
+| `codex`（含 `openai` / `host-codex`） | `/pricing/codex` | OpenAI USD 列表价，见下一节 |
+| `opencode`（含 `opencode-go`） | `/pricing/opencode` | 控制台账单 USD，无固定价目 |
+| `deepseek` | `/pricing/deepseek` | 本地 CNY 表计价；旧价目已不在面板与价格页展示 |
+
+**AICodeMirror（`aicodemirror1`）** 的价目在 [`config/aicodemirror-pricing.json`](config/aicodemirror-pricing.json)，
+报价为 **USD / 1,000,000 tokens**，记账人民币：`CNY = USD × 组倍率`，逐 bucket 折算并四舍五入到 6 位小数。
+
+| 组 | 倍率 | 已公布档位 |
+|---|---:|---|
+| ClaudeCode | 1.15 | 标准 ≤272K（`claude-haiku-5-5` 为 ≤100K）；`claude-haiku-5-5` 长档 >100K |
+| Codex | 0.50 | 标准 ≤272K / 长档 >272K |
+| Gemini | 0.94 | 单一档位（未公布缓存创建列） |
+| Grok | 0.43 | 标准 ≤200K / 长档 >200K |
+
+- 共 **30 个模型 / 43 个档位**（其中 13 个长档）：13 Claude + 8 Codex + 5 Gemini + 4 Grok。
+- 档位按**单请求上下文**（未缓存输入 + 缓存写 + 缓存读）选择，不是会话 token 总量；阈值严格大于才进长档。
+  只有单一档位且请求超出其上限时，仍按该档计价，但行会标记为「估算」，不会把未知写成免费。
+- `claude-haiku-5-5` 按**用户确认的口径**以 100K 分档：**≤100K 标准、>100K 长档**。公开接口
+  `https://www.aicodemirror.ai/api/model-pricing` 仍写 standard「≤272K」、long「>100K」，用户已确认 272K 是错的，
+  卡片按用户校正执行（接口文案视为过时）；因此该模型不再重叠，也不会再出现「档位重叠」提示。
+- 通用保护仍在：任何真正重叠的档位都不会被猜价，仍按未定价/待确认处理（费用 0 + 告警）并在价格页并列两档。
+- Gemini / Grok 没有缓存创建列：页面显示 `—`，计费用该组输入价兜底，并在真正用到该桶时把行标为「估算」。
+- 只有 `aicodemirror1` 走这张卡；同一模型 id 在别的提供方仍按各自价表计价，不会被连带改价。
+- DeepSeek 的本地计价与官方同步都没变，只是主面板与价格页不再打印它的旧单价。
+
+下面的回退表仍然生效（DeepSeek、未列型号，以及没有专属价卡的提供方），但不再在界面上逐项展示。
 默认价表在 [`config/pricing.json`](config/pricing.json)，单位 **CNY / 1,000,000 tokens**。
-该表只给**非** opencode 提供方（例如 `aicodemirror1` 的 claude）估算 CNY；
+该表只给**非** opencode 且没有专属价卡的提供方估算 CNY；
 `opencode` / `opencode-go` 一律按控制台账单计 USD，见上一节：
 
 | 模型 | 输入（未缓存） | 输出 | 缓存写 | 缓存读 |
@@ -416,10 +458,13 @@ DSH_CostLive/
 ├─ bin/
 │  ├─ dsh-cost.mjs            # CLI 入口
 │  └─ dsh-cost-live.mjs       # 实时面板入口（server / --watch / --once）
-├─ config/pricing.json        # 价表（谷/峰/别名）
+├─ config/pricing.json        # 回退价表（谷/峰/别名）
+├─ config/aicodemirror-pricing.json # aicodemirror1 四组 USD 报价 + 倍率 + 档位
 ├─ config/sources.json        # 数据源：主机 ~/.dsh + VM 镜像 .dsh-vm
 ├─ src/
 │  ├─ pricing.mjs             # 价表归一、模型匹配、峰谷判定、micro-CNY 计价
+│  ├─ provider-pricing.mjs    # 提供方价卡：归一、档位选择、CNY=USD×倍率
+│  ├─ pricing-pages.mjs       # 提供方价格页（同站 /pricing/<id> 与静态配套页）
 │  ├─ engine.mjs              # 事件流 fold → 计费采样与四桶聚合
 │  ├─ sessions.mjs            # 会话发现、日志读取、投影缓存
 │  ├─ sources.mjs             # 主机/VM 多数据源解析与标签
@@ -431,9 +476,9 @@ DSH_CostLive/
 │  ├─ report-text.mjs         # 终端表格 / 明细 / 价格表
 │  ├─ report-html.mjs         # 自包含 HTML 报告（CSS/JS 内联）
 │  ├─ live.mjs                # 实时页文档 / 片段 / 原子写入
-│  ├─ live-server.mjs         # 本地 HTTP 服务与三个 API
+│  ├─ live-server.mjs         # 本地 HTTP 服务：页面、API 与 /pricing/<id>
 │  └─ live-client.js          # 浏览器端：轮询、折叠、范围、滚动恢复
-├─ test/                      # node:test 13 个文件 122 项 + Windows 回归测试
+├─ test/                      # node:test 14 个文件 151 项 + Windows 回归测试
 ├─ tools/make-demo-home.mjs   # 合成演示数据生成器
 ├─ tools/sync-vm-dsh.ps1      # 从 VMware VM 增量同步 ~/.dsh 到 .dsh-vm
 ├─ tools/vm-sync-snapshot.sh  # VM 端增量打包脚本
@@ -460,12 +505,12 @@ npm test
 
 | 文件 | 项数 | 覆盖 |
 |---|---:|---|
-| `pricing.test.mjs` | 11 | 价格归一、别名、通配、峰谷判定、micro-CNY 精度、内置表一致性 |
+| `pricing.test.mjs` | 12 | 价格归一、别名、通配、峰谷判定、micro-CNY 精度、内置表一致性 |
 | `engine.test.mjs` | 15 | 流式样本替换、重试、四桶归并、零用量、模型切换、opencode 待官网 |
 | `activity.test.mjs` | 8 | `openStep` 权威性、`turnBoundary` 回退、子代理双通道识别、三桶稳定排序 |
 | `time-range.test.mjs` | 22 | 四档边界、缺失日期、聚合算术、浏览器运行时、DOM 事件、存储容错、HTML 集成 |
 | `daily.test.mjs` | 11 | 跨午夜拆分、未知时间桶、自然日边界、按天聚合去重、按天视图 DOM/存储 |
-| `billing.test.mjs` | 10 | 订阅真实价格摊销、自然月天数、生效日切换、共享提供方合计、idle 成本、设置 API |
+| `billing.test.mjs` | 16 | 逐笔订阅有效期与到期日、当日/提前/延迟续费与空档、月末与闰年截断、跨年、日筛选与总额、时区、旧配置兼容、设置 UI 与 API |
 | `live.test.mjs` | 6 | 采集/过滤、模板拆分、原子写入、HTTP API |
 | `opencode-usage.test.mjs` | 17 | 官方行归一、去重、会话覆盖、窗口合计、缓存节省、401/403 分类与页面提示、`--check-auth` |
 | `i18n.test.mjs` | 5 | 语言标签解析、占位符替换、中英键集与占位符一致 |
@@ -473,7 +518,8 @@ npm test
 | `sessions.test.mjs` | 2 | 会话发现与读取 |
 | `zstd.test.mjs` | 2 | 多 frame 解压、非压缩 JSONL 兜底 |
 | `parent-session.test.mjs` | 10 | 父会话 id 归一、按数据源解析、筛选外父名、嵌套父代理、缺失/无标题兜底、两视图角色标记、HTML 转义、数据集字段 |
-| **合计（`npm test`）** | **122** | |
+| `provider-pricing.test.mjs` | 22 | AICodeMirror 30 模型 / 43 档位全量核对、四组倍率、提供方隔离、272K/200K 与缓存桶边界、重叠待确认、不重复记账、价格页/链接/静态配套页/转义 |
+| **合计（`npm test`）** | **151** | |
 
 `npm run test:ps` 另有 45 项 Windows 定向回归测试：无窗口启动（GUI 宿主 + CREATE_NO_WINDOW）、含空格/引号参数的
 引号化、单实例 mutex、离线退避序列、VBS 入口与错误文案，见 [docs/host-sync-windowless.md](docs/host-sync-windowless.md)。

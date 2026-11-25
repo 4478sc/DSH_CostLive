@@ -1,7 +1,9 @@
 /** Self-contained HTML report. */
 import { activityLabel, sortSessionRecords } from './activity.mjs';
 import { averageTokenPrice, formatMoney, formatUsd, sortCostMicro } from './money.mjs';
-import { canonicalProvider, describePeakHours, formatCny, formatTokens } from './pricing.mjs';
+import { canonicalProvider, formatCny, formatTokens, loadUsdPricing } from './pricing.mjs';
+import { loadProviderPricing } from './provider-pricing.mjs';
+import { providerPageHref, renderPriceLinks } from './pricing-pages.mjs';
 import { formatPercent, formatTime } from './format.mjs';
 import { buildTimeRangeDataset, modelCacheSavingMicro } from './report-data.mjs';
 import { DAILY_PAGE_SIZE, formatDay, formatRangeLabel, timeRangeRuntimeSource } from './time-range.mjs';
@@ -45,9 +47,13 @@ function modelCostText(model, tr) {
 export function modelLabel(model, tr) {
   const name = model?.model ?? 'unknown';
   const suffix = (key) => (typeof tr === 'function' ? tr(key) : key === 'model.peak' ? '（峰值）' : '（谷值）');
-  if (model?.tier === 'peak') return `${name}${suffix('model.peak')}`;
-  if (model?.tier === 'off') return `${name}${suffix('model.off')}`;
-  return name;
+  let label = name;
+  if (model?.tier === 'peak') label += suffix('model.peak');
+  else if (model?.tier === 'off') label += suffix('model.off');
+  // A provider card splits its row by context tier; the long row must not look
+  // like the standard one.
+  if (model?.contextTier === 'long') label += typeof tr === 'function' ? tr('model.longTag') : ' (long)';
+  return label;
 }
 
 /** Aggregate per-model totals across all sessions. */
@@ -142,6 +148,24 @@ function bar(value, max, className = '') {
   return `<div class="bar ${className}" aria-hidden="true"><i style="width:${width}%"></i></div>`;
 }
 
+/** Provider card from config/, or null when the file is absent or invalid. */
+function safeProviderCard() {
+  try {
+    return loadProviderPricing();
+  } catch {
+    return null;
+  }
+}
+
+/** USD list-price table from config/, or null when absent. */
+function safeUsdCard() {
+  try {
+    return loadUsdPricing();
+  } catch {
+    return null;
+  }
+}
+
 /** Build the complete standalone HTML document. */
 export function renderHtml(report, options = {}) {
   const locale = normalizeLocale(options.locale);
@@ -187,37 +211,19 @@ export function renderHtml(report, options = {}) {
   const datasetJson = JSON.stringify(buildReportDataset(report)).replace(/</gu, '\\u003c');
   const rangeNote = tr('range.note.all', { count: sessions.length });
 
-  const priceRows = Object.entries(pricing.models)
-    .map(
-      ([id, price]) => `<tr>
-        <td class="mono">${escapeHtml(id)}${price.peak === undefined ? '' : ` <span class="muted">${tr('model.offpeakTag')}</span>`}</td>
-        <td class="num">${price.input}</td>
-        <td class="num">${price.output}</td>
-        <td class="num">${price.cacheWrite}</td>
-        <td class="num">${price.cacheRead}</td>
-      </tr>`,
-    )
-    .join('');
-
-  // Two-tier models: the table above lists the default (off-peak) prices, so
-  // spell out the peak tier and the hours it applies to.
-  const tariffNotes = Object.entries(pricing.models)
-    .filter(([, price]) => price.peak !== undefined)
-    .map(([id, price]) => {
-      const peak = price.peak;
-      return `<div class="note">${escapeHtml(
-        tr('tariff.peak', {
-          id,
-          input: peak.input,
-          output: peak.output,
-          cacheWrite: peak.cacheWrite,
-          cacheRead: peak.cacheRead,
-          currency: report.currency,
-          hours: describePeakHours(price, locale === 'en' ? MESSAGES.en : null) ?? '',
-        }),
-      )}</div>`;
-    })
-    .join('');
+  // The price section is a list of provider cards, one link per provider. Rates
+  // live on their own page so the dashboard never prints a stale table, and a
+  // live fragment refresh cannot break an already-open price page.
+  const providerCard = options.providerPricing === undefined ? safeProviderCard() : options.providerPricing;
+  const usdCard = options.usdPricing === undefined ? safeUsdCard() : options.usdPricing;
+  const priceSection = renderPriceLinks({
+    report,
+    card: providerCard,
+    usdPricing: usdCard,
+    pricing,
+    locale,
+    hrefFor: typeof options.pricingHref === 'function' ? options.pricingHref : (id) => providerPageHref(id),
+  });
 
   const modelRows = models
     .map(
@@ -554,6 +560,16 @@ export function renderHtml(report, options = {}) {
   .detail-meta code { font-family: var(--mono); font-size: 11px; }
   table.mini { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--card); }
   table.mini th, table.mini td { padding: 8px 12px; }
+  .provider-links { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 12px; padding: 4px 20px 16px; }
+  .provider-link { display: flex; flex-direction: column; gap: 4px; text-decoration: none; color: var(--text); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; background: #fbfcfd; transition: border-color .15s ease, background .15s ease; }
+  .provider-link:hover { border-color: var(--accent); background: var(--accent-soft); }
+  .provider-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .pl-top { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+  .pl-title { font-weight: 650; }
+  .pl-badge { color: var(--muted); font-size: 11px; }
+  .pl-desc { color: var(--muted); font-size: 12px; line-height: 1.5; }
+  .pl-meta { color: #475569; font-size: 11.5px; }
+  .pl-go { color: var(--accent); font-size: 11.5px; font-weight: 600; margin-top: 2px; }
   .note { padding: 12px 20px; font-size: 12px; color: var(--muted); border-top: 1px solid var(--line); }
   .note.warn { background: var(--warn-soft); color: var(--warn); border-top-color: #fcd34d; }
   footer { color: var(--muted); font-size: 12px; text-align: center; margin-top: 28px; line-height: 1.8; }
@@ -683,18 +699,8 @@ ${BILLING_CSS}
     <div class="note">${escapeHtml(tr('section.daily.hint'))}</div>
   </section>
 
-  <section>
-    <h2>${escapeHtml(tr('section.price', { currency: report.currency, tokens: formatTokens(report.unitTokens) }))}</h2>
-    <div class="table-wrap">
-      <table>
-        <thead><tr><th>${tr('table.model')}</th><th class="num">${tr('table.input')}</th><th class="num">${tr('table.output')}</th><th class="num">${tr('table.cacheCreate')}</th><th class="num">${tr('table.cacheReadLong')}</th></tr></thead>
-        <tbody>${priceRows}</tbody>
-      </table>
-    </div>
-    ${tariffNotes}
-    <div class="note">${tr('section.price.note')}</div>
-  </section>
 
+  ${priceSection}
   </div>
   <div id="real-pricing-content">${real ? realBody(real, locale) : ''}</div>
   <footer>

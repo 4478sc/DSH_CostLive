@@ -10,17 +10,13 @@
       },
       {
         "effectiveFrom": "2026-12-01",
-        "monthlyUsd": 30
+        "monthlyUsd": 20
       }
     ],
     "codex": [
       {
-        "effectiveFrom": "2026-11-01",
+        "effectiveFrom": "2026-11-15",
         "monthlyUsd": 100
-      },
-      {
-        "effectiveFrom": "2026-12-01",
-        "monthlyUsd": 200
       }
     ]
   }

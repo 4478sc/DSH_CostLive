@@ -12,6 +12,8 @@ import { fileURLToPath } from 'node:url';
 import { sortSessionResults } from './activity.mjs';
 import { analyzeEvents } from './engine.mjs';
 import { loadPricing, loadUsdPricing, priceTier, resolvePrice } from './pricing.mjs';
+import { loadProviderPricing } from './provider-pricing.mjs';
+import { providerPageFileName, providerPageHref, writeProviderPages } from './pricing-pages.mjs';
 import { buildReport } from './report-data.mjs';
 import { buildReportDataset, escapeHtml, renderHtml } from './report-html.mjs';
 import { discoverSessions, readSession } from './sessions.mjs';
@@ -161,6 +163,11 @@ export function collectLiveReport(options = {}) {
   const usdPricing =
     options.usdPricingDocument ??
     loadUsdPricing(options.usdPricingPath === undefined ? undefined : resolve(options.usdPricingPath));
+  // Provider-scoped card (AICodeMirror). Only its own route is priced from it,
+  // so an unrelated provider with the same model id keeps its old price.
+  const providerPricing =
+    options.providerPricingDocument ??
+    loadProviderPricing(options.providerPricingPath === undefined ? undefined : resolve(options.providerPricingPath));
   const billingDate = (value) => {
     if (value === undefined) return undefined;
     if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
@@ -189,7 +196,7 @@ export function collectLiveReport(options = {}) {
         const { meta, events, projection } = readSession(descriptor);
         meta.source = source.label;
         meta.sourceHome = source.home;
-        results.push({ meta, analysis: analyzeEvents(events, pricing, usdPricing), projection });
+        results.push({ meta, analysis: analyzeEvents(events, pricing, usdPricing, providerPricing), projection });
         scanned += 1;
       } catch (error) {
         if (typeof options.onWarning === 'function') {
@@ -295,7 +302,16 @@ export function summarizeReport(report) {
 /** HTML body fragment swapped into the open page on every refresh. */
 export function renderLiveFragment(report, options = {}) {
   const locale = options.locale;
-  const { body } = splitReportHtml(renderHtml(report, { locale }));
+  // The fragment is the dashboard body, so it carries the same provider links as
+  // the full page; swapping it never drops the price section.
+  const { body } = splitReportHtml(
+    renderHtml(report, {
+      locale,
+      providerPricing: options.providerPricing,
+      usdPricing: options.usdPricing,
+      pricingHref: options.pricingHref,
+    }),
+  );
   return {
     generatedAt: report.generatedAt,
     generatedAtISO: report.generatedAtISO,
@@ -338,7 +354,15 @@ export function renderLiveDocument(options) {
     title = null,
   } = options;
   const locale = normalizeLocale(rawLocale);
-  const { styles, body } = splitReportHtml(renderHtml(report, { locale }));
+  // In http mode the links are same-origin routes; a static file page points at
+  // the companion pricing-<id>.html files written next to it.
+  const pricingHref =
+    typeof options.pricingHref === 'function'
+      ? options.pricingHref
+      : (id) => (mode === 'file' ? providerPageFileName(id) : providerPageHref(id));
+  const { styles, body } = splitReportHtml(
+    renderHtml(report, { locale, providerPricing: options.providerPricing, usdPricing: options.usdPricing, pricingHref }),
+  );
   const bodyWithId = body.replace('<div class="wrap">', '<div class="wrap" id="live-wrap">');
   const config = {
     version: LIVE_VERSION,
@@ -402,5 +426,40 @@ export function writeLiveSnapshot(options) {
       /* best effort */
     }
   }
+  // A file:// snapshot cannot serve /pricing/<id>, so the companion pages are
+  // written next to it and the links stay relative.
+  try {
+    const report = options.report;
+    if (report !== null && report !== undefined && report.summary !== undefined) {
+      writeProviderPages({
+        outPath: target,
+        report,
+        card: options.providerPricing ?? safeCard(),
+        usdPricing: options.usdPricing ?? safeUsd(),
+        pricing: report.pricing ?? null,
+        locale: options.locale,
+      });
+    }
+  } catch {
+    /* the snapshot itself is still useful without its companion pages */
+  }
   return target;
+}
+
+/** Provider card from config/, or null. */
+function safeCard() {
+  try {
+    return loadProviderPricing();
+  } catch {
+    return null;
+  }
+}
+
+/** USD table from config/, or null. */
+function safeUsd() {
+  try {
+    return loadUsdPricing();
+  } catch {
+    return null;
+  }
 }

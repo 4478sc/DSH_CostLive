@@ -47,13 +47,15 @@ live.mjs :: collectLiveReport(options)
 | `zstd.mjs` | 解析 zstd frame 边界并逐帧解压 | 不解析 JSON 语义 |
 | `engine.mjs` | 事件 → 计费采样（替换/重试规则）与四桶聚合 | 不决定展示格式 |
 | `pricing.mjs` | 价表归一、模型匹配、峰谷判定、整数 micro-CNY | 不读会话日志 |
+| `provider-pricing.mjs` | 提供方价卡归一（组/倍率/档位）、按单请求上下文选档、CNY = USD × 倍率 | 不覆盖其它提供方的同名模型 |
+| `pricing-pages.mjs` | 主面板的提供方链接、独立价格页 HTML、静态配套页写入 | 不读会话标题/id/工作区 |
 | `activity.mjs` | 运行中/子代理判定与排序比较器 | 不改变费用 |
 | `time-range.mjs` | 四档筛选、按天视图的自然日边界/聚合、浏览器运行时源码 | 不发请求、不碰 DSH |
 | `report-data.mjs` | 会话记录、按天桶、summary、数据集、CSV | 不拼 HTML |
 | `report-text.mjs` | 终端表格 / 单会话明细 | — |
 | `report-html.mjs` | 自包含报告、折叠、范围选择器、内嵌数据集 | 不重新实现筛选规则（调用 time-range） |
 | `live.mjs` | 实时页文档/片段、原子写入 | 不重复实现采集 |
-| `live-server.mjs` | HTTP、路由、请求合并、健康检查 | 不重复实现渲染 |
+| `live-server.mjs` | HTTP、路由（含 `/pricing/<id>`）、请求合并、健康检查 | 不重复实现渲染 |
 | `live-client.js` | 轮询/重载、浮窗、状态恢复、DOM 交互 | 不实现筛选规则（用注入的运行时） |
 
 ## 3. 关键不变量

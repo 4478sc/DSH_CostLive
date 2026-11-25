@@ -60,13 +60,19 @@ export function sessionRecord({ meta, analysis, projection }, parents) {
       costMicroUsd: analysis.totals.costMicroUsd ?? 0,
       cacheHit: analysis.totals.cacheHit === null ? null : round(analysis.totals.cacheHit, 4),
       samples: analysis.totals.samples,
+      estimatedSamples: analysis.totals.estimatedSamples ?? 0,
     },
     models: analysis.byModel.map((entry) => ({
       provider: entry.provider,
       model: entry.model,
       tier: entry.tier ?? null,
+      contextTier: entry.contextTier ?? null,
+      cardGroup: entry.cardGroup ?? null,
       priceKey: entry.priceKey,
       priced: entry.priced,
+      estimated: entry.estimated === true,
+      estimatedReason: entry.estimatedReason ?? null,
+      cacheSavingMicroCny: entry.cacheSavingMicroCny ?? 0,
       tokens: { ...entry.tokens },
       costCny: round(entry.costCny),
       costMicroCny: entry.costMicroCny,
@@ -197,15 +203,19 @@ export function buildDailyReport(results, pricing, parents) {
       session.tokens.cacheReadTokens += buckets.cacheReadTokens;
 
       const modelProvider = canonicalProvider(record.provider);
-      const modelKey = `${modelProvider ?? '?'}\u0000${record.model ?? '?'}\u0000${record.tier ?? ''}`;
+      const modelKey = `${modelProvider ?? '?'}\u0000${record.model ?? '?'}\u0000${record.tier ?? ''}\u0000${record.contextTier ?? ''}`;
       let model = session.models.get(modelKey);
       if (model === undefined) {
         model = {
           provider: modelProvider,
           model: record.model ?? null,
           tier: record.tier ?? null,
+          contextTier: record.contextTier ?? null,
+          cardGroup: record.cardGroup ?? null,
           priceKey: record.priceKey ?? null,
           priced: record.priced === true,
+          estimated: false,
+          estimatedReason: null,
           costMicroCny: 0,
           costMicroUsd: 0,
           cacheSavingMicro: 0,
@@ -213,6 +223,10 @@ export function buildDailyReport(results, pricing, parents) {
           tokens: emptyTokens(),
         };
         session.models.set(modelKey, model);
+      }
+      if (record.estimated === true) {
+        model.estimated = true;
+        model.estimatedReason = model.estimatedReason ?? record.estimatedReason ?? 'estimate';
       }
       // A group can hold both official and still-pending rows; the official
       // marker wins so the row shows money instead of 「待官网」.
@@ -232,9 +246,16 @@ export function buildDailyReport(results, pricing, parents) {
       const usdRow =
         record.priceKey === 'opencode-official' ||
         (typeof record.priceKey === 'string' && record.priceKey.startsWith('usd-'));
-      const resolved = !usdRow && record.priced === true ? resolvePrice(record.model, pricing) : null;
+      // Provider-card rows carry their own CNY cache saving (the rates used for
+      // billing), so the legacy table must not re-derive it from another row.
+      const resolved =
+        !usdRow && record.priced === true && !Number.isFinite(record.cacheSavingMicroCny)
+          ? resolvePrice(record.model, pricing)
+          : null;
       if (usdRow) {
         model.cacheSavingMicroUsd += record.cacheSavingMicroUsd ?? 0;
+      } else if (Number.isFinite(record.cacheSavingMicroCny)) {
+        model.cacheSavingMicro += record.cacheSavingMicroCny;
       } else if (resolved !== null) {
         // Same formula as modelCacheSavingMicro(), rounded per day+model so the
         // browser's integer sum reproduces the server number.
@@ -266,8 +287,12 @@ export function buildDailyReport(results, pricing, parents) {
             provider: model.provider,
             model: model.model,
             tier: model.tier ?? null,
+            contextTier: model.contextTier ?? null,
+            cardGroup: model.cardGroup ?? null,
             priceKey: model.priceKey ?? null,
             priced: model.priced,
+            estimated: model.estimated === true,
+            estimatedReason: model.estimatedReason ?? null,
             costMicroCny: model.costMicroCny,
             costMicroUsd: model.costMicroUsd,
             cacheSavingMicro: model.cacheSavingMicro,
@@ -327,11 +352,20 @@ export function buildTimeRangeDataset({ sessions, pricing, pageSize = 5, daily }
         provider: model.provider ?? null,
         model: model.model ?? null,
         tier: model.tier ?? null,
+        contextTier: model.contextTier ?? null,
+        cardGroup: model.cardGroup ?? null,
         priceKey: model.priceKey ?? null,
         priced: model.priced === true,
+        estimated: model.estimated === true,
+        estimatedReason: model.estimatedReason ?? null,
         costMicroCny: model.costMicroCny,
         costMicroUsd: model.costMicroUsd ?? 0,
-        cacheSavingMicro: model.priceKey === 'opencode-official' ? 0 : Math.round(modelCacheSavingMicro(model, pricing)),
+        cacheSavingMicro:
+          model.priceKey === 'opencode-official'
+            ? 0
+            : Number.isFinite(model.cacheSavingMicroCny)
+              ? model.cacheSavingMicroCny
+              : Math.round(modelCacheSavingMicro(model, pricing)),
         cacheSavingMicroUsd: model.cacheSavingMicroUsd ?? 0,
         tokens: {
           uncachedInputTokens: model.tokens.uncachedInputTokens,
@@ -351,6 +385,7 @@ export function buildTimeRangeDataset({ sessions, pricing, pageSize = 5, daily }
         parentFound: session.parentFound === true,
         costMicroCny: session.totals.costMicroCny,
         costMicroUsd: session.totals.costMicroUsd ?? 0,
+        estimatedSamples: session.totals.estimatedSamples ?? 0,
         cacheSavingMicro: models.reduce((sum, model) => sum + model.cacheSavingMicro, 0),
         cacheSavingMicroUsd: models.reduce((sum, model) => sum + model.cacheSavingMicroUsd, 0),
         tokens: {
@@ -397,8 +432,12 @@ export function buildTimeRangeDataset({ sessions, pricing, pageSize = 5, daily }
           provider: model.provider ?? null,
           model: model.model ?? null,
           tier: model.tier ?? null,
+          contextTier: model.contextTier ?? null,
+          cardGroup: model.cardGroup ?? null,
           priceKey: model.priceKey ?? null,
           priced: model.priced === true,
+          estimated: model.estimated === true,
+          estimatedReason: model.estimatedReason ?? null,
           costMicroCny: model.costMicroCny,
           costMicroUsd: model.costMicroUsd ?? 0,
           cacheSavingMicro: model.cacheSavingMicro,
@@ -408,6 +447,73 @@ export function buildTimeRangeDataset({ sessions, pricing, pageSize = 5, daily }
       })),
     })),
   };
+}
+
+/**
+ * Aggregate billed usage per canonical provider.
+ *
+ * Provider price pages read this to show "what this route actually served"
+ * without exposing a session id, title, or workspace: totals only.
+ */
+export function buildProviderUsage(sessions) {
+  const providers = new Map();
+  for (const session of sessions) {
+    for (const model of session.models) {
+      const id = canonicalProvider(model.provider) ?? 'unknown';
+      let entry = providers.get(id);
+      if (entry === undefined) {
+        entry = {
+          provider: id,
+          tokens: emptyTokens(),
+          totalTokens: 0,
+          costMicroCny: 0,
+          costMicroUsd: 0,
+          samples: 0,
+          priced: false,
+          estimated: false,
+          models: new Map(),
+        };
+        providers.set(id, entry);
+      }
+      const modelKey = `${model.model ?? '?'}\u0000${model.contextTier ?? ''}`;
+      let row = entry.models.get(modelKey);
+      if (row === undefined) {
+        row = {
+          model: model.model ?? null,
+          contextTier: model.contextTier ?? null,
+          cardGroup: model.cardGroup ?? null,
+          priceKey: model.priceKey ?? null,
+          priced: model.priced === true,
+          estimated: model.estimated === true,
+          tokens: emptyTokens(),
+          costMicroCny: 0,
+          costMicroUsd: 0,
+          samples: 0,
+        };
+        entry.models.set(modelKey, row);
+      }
+      const buckets = model.tokens ?? emptyTokens();
+      for (const field of ['uncachedInputTokens', 'outputTokens', 'cacheWriteTokens', 'cacheReadTokens']) {
+        entry.tokens[field] += buckets[field] ?? 0;
+        row.tokens[field] += buckets[field] ?? 0;
+      }
+      entry.totalTokens += tokensTotal(buckets);
+      entry.costMicroCny += model.costMicroCny ?? 0;
+      entry.costMicroUsd += model.costMicroUsd ?? 0;
+      entry.samples += model.samples ?? 0;
+      entry.priced = entry.priced || model.priced === true;
+      entry.estimated = entry.estimated || model.estimated === true;
+      row.costMicroCny += model.costMicroCny ?? 0;
+      row.costMicroUsd += model.costMicroUsd ?? 0;
+      row.samples += model.samples ?? 0;
+    }
+  }
+  return [...providers.values()]
+    .map((entry) => ({
+      ...entry,
+      models: [...entry.models.values()].sort((a, b) => sortCostMicro(b) - sortCostMicro(a) || tokensTotal(b.tokens) - tokensTotal(a.tokens)),
+    }))
+    .sort((a, b) => sortCostMicro(b) - sortCostMicro(a) || String(a.provider).localeCompare(String(b.provider)));
 }
 
 /** Build the complete report object emitted by `--format json`. */
@@ -431,6 +537,7 @@ export function buildReport({ home, sources = [], pricing, results, generatedAt,
       acc.totalTokens += session.totals.totalTokens;
       acc.costMicroCny += session.totals.costMicroCny;
       acc.costMicroUsd += session.totals.costMicroUsd;
+      acc.estimatedSamples += session.totals.estimatedSamples ?? 0;
       if (session.totals.costMicroCny > 0 || session.totals.costMicroUsd > 0) acc.pricedSessions += 1;
       return acc;
     },
@@ -444,6 +551,7 @@ export function buildReport({ home, sources = [], pricing, results, generatedAt,
       totalTokens: 0,
       costMicroCny: 0,
       costMicroUsd: 0,
+      estimatedSamples: 0,
     },
   );
   const billedInput = summary.inputTokens + summary.cacheWriteTokens + summary.cacheReadTokens;
@@ -478,6 +586,7 @@ export function buildReport({ home, sources = [], pricing, results, generatedAt,
       pendingModels: [...new Set(sessions.flatMap((session) => session.pendingModels ?? []))],
     },
     sessions,
+    providerUsage: buildProviderUsage(sessions),
     daily: buildDailyReport(results, pricing, parents),
     sources: sources.map((source) => ({
       label: source.label,

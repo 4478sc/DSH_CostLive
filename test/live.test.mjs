@@ -61,8 +61,10 @@ test('collectLiveReport mirrors CLI filters, pricing, and empty-session handling
     // is billed by the OpenCode console, so without an archived console row it
     // is pending (0 CNY) rather than a CNY estimate. Only sonnet bills here.
     assert.equal(report.summary.pricedSessions, 1);
-    assert.equal(report.summary.costMicroCny, 4140);
-    assert.equal(report.summary.costCny, 0.00414);
+    // The AICodeMirror card prices claude-sonnet-5-5 in CNY as USD x 1.15:
+    // 1000x2.3 + 100x11.5 + 200x2.875 + 500x0.115 = 4082.5 -> 4083 micro-CNY.
+    assert.equal(report.summary.costMicroCny, 4083);
+    assert.equal(report.summary.costCny, 0.004083);
     assert.deepEqual(report.summary.unpricedModels, []);
     assert.equal(report.summary.pendingSessions, 1);
     assert.deepEqual(report.summary.pendingModels, ['deepseek-v4.1-flash']);
@@ -163,7 +165,18 @@ test('writeLiveSnapshot writes atomically and leaves no temp file', () => {
     const html = readFileSync(outPath, 'utf8');
     assert.match(html, /实时测试会话/u);
     assert.match(html, /"autoReload":true/u);
-    assert.deepEqual(readdirSync(outDir), ['dsh-cost-live.html']);
+    // The file:// snapshot writes one companion price page per provider next to
+    // itself, because a static document cannot serve /pricing/<id>.
+    assert.deepEqual(readdirSync(outDir).sort(), [
+      'dsh-cost-live.html',
+      'pricing-aicodemirror1.html',
+      'pricing-codex.html',
+      'pricing-deepseek.html',
+      'pricing-opencode.html',
+    ]);
+    const acmPage = readFileSync(join(outDir, 'pricing-aicodemirror1.html'), 'utf8');
+    assert.match(acmPage, /¥2\.3/u);
+    assert.match(acmPage, /href="dsh-cost-live\.html"/u);
   } finally {
     rmSync(home, { recursive: true, force: true });
     rmSync(outDir, { recursive: true, force: true });
@@ -197,7 +210,7 @@ test('live server serves the page, fragment, report, and health endpoints', asyn
     const fragment = await fragmentResponse.json();
     assert.equal(fragment.summary.sessions, 2);
     assert.equal(fragment.summary.costMicroCny, undefined);
-    assert.equal(fragment.summary.costCny, 0.00414);
+    assert.equal(fragment.summary.costCny, 0.004083);
     assert.equal(fragment.intervalMs, 20_000);
     assert.equal(fragment.stale, false);
     assert.match(fragment.html, /实时测试会话/u);

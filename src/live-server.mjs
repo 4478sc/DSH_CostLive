@@ -15,8 +15,11 @@
  */
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
+import { resolve } from 'node:path';
 import { formatMoney } from './money.mjs';
-import { formatCny, formatTokens } from './pricing.mjs';
+import { formatCny, formatTokens, loadUsdPricing } from './pricing.mjs';
+import { loadProviderPricing } from './provider-pricing.mjs';
+import { providerPageHref, renderProviderPage } from './pricing-pages.mjs';
 import {
   DEFAULT_INTERVAL_MS,
   DEFAULT_PORT,
@@ -156,6 +159,28 @@ export async function startLiveServer(options = {}) {
     },
   };
 
+  // Provider price pages read the same config documents the report uses, so a
+  // custom --pricing/--usd path keeps the page and the bill in agreement.
+  function providerDocs() {
+    let card = reportOptions.providerPricingDocument;
+    if (card === undefined) {
+      try {
+        card = loadProviderPricing(reportOptions.providerPricingPath === undefined ? undefined : resolve(reportOptions.providerPricingPath));
+      } catch {
+        card = null;
+      }
+    }
+    let usd = reportOptions.usdPricingDocument;
+    if (usd === undefined) {
+      try {
+        usd = loadUsdPricing(reportOptions.usdPricingPath === undefined ? undefined : resolve(reportOptions.usdPricingPath));
+      } catch {
+        usd = null;
+      }
+    }
+    return { card, usd };
+  }
+
   let cache = null;
   let lastError = null;
   let scans = 0;
@@ -202,8 +227,19 @@ export async function startLiveServer(options = {}) {
       scans += 1;
       lastScanMs = scanMs;
       lastError = null;
-      const fragment = renderLiveFragment(report, { locale: defaultLocale });
-      const page = renderLiveDocument({ report, mode: 'http', intervalMs, title: pageTitle, serverUrl: null, locale: defaultLocale });
+      const docs = providerDocs();
+      const fragment = renderLiveFragment(report, { locale: defaultLocale, providerPricing: docs.card, usdPricing: docs.usd, pricingHref: providerPageHref });
+      const page = renderLiveDocument({
+        report,
+        mode: 'http',
+        intervalMs,
+        title: pageTitle,
+        serverUrl: null,
+        locale: defaultLocale,
+        providerPricing: docs.card,
+        usdPricing: docs.usd,
+        pricingHref: providerPageHref,
+      });
       const previous = cache?.report ?? null;
       cache = { at: Date.now(), report, fragment, page, error: null };
       logChange(previous, report, scanMs);
@@ -279,7 +315,56 @@ export async function startLiveServer(options = {}) {
     try {
       if (pathname === '/' || pathname === '/index.html') {
         const current = refresh(false);
-        const page = locale === defaultLocale ? current.page : renderLiveDocument({ report: current.report, mode: 'http', intervalMs, title: pageTitle, serverUrl: null, locale });
+        const page =
+          locale === defaultLocale
+            ? current.page
+            : renderLiveDocument({
+                report: current.report,
+                mode: 'http',
+                intervalMs,
+                title: pageTitle,
+                serverUrl: null,
+                locale,
+                providerPricing: providerDocs().card,
+                usdPricing: providerDocs().usd,
+                pricingHref: providerPageHref,
+              });
+        sendHtml(response, 200, page, headOnly);
+        return;
+      }
+      // Provider price pages: same-origin, one document per provider id. The URL
+      // carries nothing but the id, and the page itself lists aggregate usage
+      // only, so it cannot leak a session title, id or workspace.
+      if (pathname === '/pricing' || pathname === '/pricing/') {
+        response.writeHead(302, { Location: '/', 'Cache-Control': 'no-store' });
+        response.end();
+        return;
+      }
+      const pricingMatch = /^\/pricing\/([^/]+)\/?$/u.exec(pathname);
+      if (pricingMatch !== null) {
+        let providerId;
+        try {
+          providerId = decodeURIComponent(pricingMatch[1]);
+        } catch {
+          sendText(response, 400, 'Bad Request');
+          return;
+        }
+        const current = refresh(false);
+        const docs = providerDocs();
+        const page = renderProviderPage({
+          id: providerId,
+          report: current.report,
+          card: docs.card,
+          usdPricing: docs.usd,
+          pricing: current.report.pricing ?? null,
+          locale,
+          backHref: '/',
+          generatedAt: current.report.generatedAt,
+        });
+        if (page === null) {
+          sendText(response, 404, 'Not Found');
+          return;
+        }
         sendHtml(response, 200, page, headOnly);
         return;
       }
@@ -290,7 +375,7 @@ export async function startLiveServer(options = {}) {
             response,
             200,
             {
-              ...renderLiveFragment(current.report, { locale }),
+              ...renderLiveFragment(current.report, { locale, providerPricing: providerDocs().card, usdPricing: providerDocs().usd, pricingHref: providerPageHref }),
               intervalMs,
               stale: Boolean(current.error),
               error: current.error ?? null,

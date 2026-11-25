@@ -1,0 +1,424 @@
+{
+  "provider": "aicodemirror1",
+  "quoteCurrency": "USD",
+  "billingCurrency": "CNY",
+  "unitTokens": 1000000,
+  "_source": "AICodeMirror public price table (https://www.aicodemirror.ai/api/model-pricing), transcribed from the user's screenshot on 2026-11-25 and re-verified against that public JSON endpoint the same day: all 43 published rows (30 models + 13 long-context rows) match row for row. Quotes are USD per 1M tokens in the order input / output / cache write / cache read. CORRECTION (user-confirmed 2026-11-25): the endpoint still prints claude-haiku-5-5 standard '<=272K' and long '>100K', which the user confirmed is wrong; that model is billed standard up to 100K and long above 100K, so this card follows the user's rule while the endpoint text is treated as stale.",
+  "_policy": "CNY = USD x the group factor, rounded to 6 decimals per bucket, so a single bill never mixes the two currencies in one column. A group that publishes no cache-write column keeps it unpublished (the page shows a dash) and bills those tokens at the group's input rate while flagging the row as an estimate. Two tiers that both cover one request are never resolved silently: the overlap is reported as unpriced/pending until the provider confirms the threshold.",
+  "groups": [
+    {
+      "id": "claudecode",
+      "label": "ClaudeCode",
+      "factor": 1.15,
+      "models": [
+        {
+          "id": "claude-fable-5-2",
+          "standard": {
+            "input": 8,
+            "output": 40,
+            "cacheWrite": 10,
+            "cacheRead": 0.2,
+            "upTo": 272000
+          }
+        },
+        {
+          "id": "claude-fable-5-1",
+          "standard": {
+            "input": 10,
+            "output": 50,
+            "cacheWrite": 12.5,
+            "cacheRead": 0.25,
+            "upTo": 272000
+          }
+        },
+        {
+          "id": "claude-opus-5-5",
+          "standard": {
+            "input": 4,
+            "output": 20,
+            "cacheWrite": 5,
+            "cacheRead": 0.2,
+            "upTo": 272000
+          }
+        },
+        {
+          "id": "claude-sonnet-5-5",
+          "standard": {
+            "input": 2,
+            "output": 10,
+            "cacheWrite": 2.5,
+            "cacheRead": 0.1,
+            "upTo": 272000
+          }
+        },
+        {
+          "id": "claude-haiku-5-5",
+          "standard": {
+            "upTo": 100000,
+            "input": 0.1,
+            "output": 0.5,
+            "cacheWrite": 0.125,
+            "cacheRead": 0.01
+          },
+          "long": {
+            "over": 100000,
+            "input": 0.5,
+            "output": 2.5,
+            "cacheWrite": 0.625,
+            "cacheRead": 0.05
+          }
+        },
+        {
+          "id": "claude-fable-5",
+          "standard": {
+            "input": 10,
+            "output": 50,
+            "cacheWrite": 12.5,
+            "cacheRead": 1,
+            "upTo": 272000
+          }
+        },
+        {
+          "id": "claude-opus-5",
+          "standard": {
+            "input": 5,
+            "output": 25,
+            "cacheWrite": 6.25,
+            "cacheRead": 0.5,
+            "upTo": 272000
+          }
+        },
+        {
+          "id": "claude-sonnet-5",
+          "standard": {
+            "input": 2,
+            "output": 10,
+            "cacheWrite": 2.5,
+            "cacheRead": 0.2,
+            "upTo": 272000
+          }
+        },
+        {
+          "id": "claude-opus-4-8",
+          "standard": {
+            "input": 5,
+            "output": 25,
+            "cacheWrite": 6.25,
+            "cacheRead": 0.5,
+            "upTo": 272000
+          }
+        },
+        {
+          "id": "claude-opus-4-7",
+          "standard": {
+            "input": 5,
+            "output": 25,
+            "cacheWrite": 6.25,
+            "cacheRead": 0.5,
+            "upTo": 272000
+          }
+        },
+        {
+          "id": "claude-opus-4-6",
+          "standard": {
+            "input": 5,
+            "output": 25,
+            "cacheWrite": 6.25,
+            "cacheRead": 0.5,
+            "upTo": 272000
+          }
+        },
+        {
+          "id": "claude-sonnet-4-6",
+          "standard": {
+            "input": 3,
+            "output": 15,
+            "cacheWrite": 3.75,
+            "cacheRead": 0.3,
+            "upTo": 272000
+          }
+        },
+        {
+          "id": "claude-haiku-4-5-20251001",
+          "standard": {
+            "input": 1,
+            "output": 5,
+            "cacheWrite": 1.25,
+            "cacheRead": 0.1,
+            "upTo": 272000
+          }
+        }
+      ]
+    },
+    {
+      "id": "codex",
+      "label": "Codex",
+      "factor": 0.5,
+      "models": [
+        {
+          "id": "gpt-6.2-astra",
+          "standard": {
+            "upTo": 272000,
+            "input": 8,
+            "output": 40,
+            "cacheWrite": 10,
+            "cacheRead": 0.4
+          },
+          "long": {
+            "over": 272000,
+            "input": 16,
+            "output": 60,
+            "cacheWrite": 20,
+            "cacheRead": 0.8
+          }
+        },
+        {
+          "id": "gpt-6.2-sol",
+          "standard": {
+            "upTo": 272000,
+            "input": 2,
+            "output": 10,
+            "cacheWrite": 2.5,
+            "cacheRead": 0.1
+          },
+          "long": {
+            "over": 272000,
+            "input": 4,
+            "output": 15,
+            "cacheWrite": 5,
+            "cacheRead": 0.2
+          }
+        },
+        {
+          "id": "gpt-6-astra",
+          "standard": {
+            "upTo": 272000,
+            "input": 10,
+            "output": 50,
+            "cacheWrite": 12.5,
+            "cacheRead": 1
+          },
+          "long": {
+            "over": 272000,
+            "input": 20,
+            "output": 75,
+            "cacheWrite": 25,
+            "cacheRead": 2
+          }
+        },
+        {
+          "id": "gpt-6.1-sol",
+          "standard": {
+            "upTo": 272000,
+            "input": 2,
+            "output": 10,
+            "cacheWrite": 2.5,
+            "cacheRead": 0.1
+          },
+          "long": {
+            "over": 272000,
+            "input": 4,
+            "output": 15,
+            "cacheWrite": 5,
+            "cacheRead": 0.2
+          }
+        },
+        {
+          "id": "gpt-6.1-terra",
+          "standard": {
+            "upTo": 272000,
+            "input": 1,
+            "output": 5,
+            "cacheWrite": 1.25,
+            "cacheRead": 0.05
+          },
+          "long": {
+            "over": 272000,
+            "input": 2,
+            "output": 7.5,
+            "cacheWrite": 2.5,
+            "cacheRead": 0.1
+          }
+        },
+        {
+          "id": "gpt-6-sol",
+          "standard": {
+            "upTo": 272000,
+            "input": 2,
+            "output": 10,
+            "cacheWrite": 2.5,
+            "cacheRead": 0.2
+          },
+          "long": {
+            "over": 272000,
+            "input": 4,
+            "output": 15,
+            "cacheWrite": 5,
+            "cacheRead": 0.4
+          }
+        },
+        {
+          "id": "gpt-5.6-sol",
+          "standard": {
+            "upTo": 272000,
+            "input": 5,
+            "output": 30,
+            "cacheWrite": 6.25,
+            "cacheRead": 0.5
+          },
+          "long": {
+            "over": 272000,
+            "input": 10,
+            "output": 45,
+            "cacheWrite": 12.5,
+            "cacheRead": 1
+          }
+        },
+        {
+          "id": "gpt-5.6-terra",
+          "standard": {
+            "upTo": 272000,
+            "input": 2,
+            "output": 12,
+            "cacheWrite": 2.5,
+            "cacheRead": 0.2
+          },
+          "long": {
+            "over": 272000,
+            "input": 4,
+            "output": 18,
+            "cacheWrite": 5,
+            "cacheRead": 0.4
+          }
+        }
+      ]
+    },
+    {
+      "id": "gemini",
+      "label": "Gemini",
+      "factor": 0.94,
+      "models": [
+        {
+          "id": "gemini-4-hydrogen",
+          "standard": {
+            "input": 1.5,
+            "output": 7.5,
+            "cacheWrite": null,
+            "cacheRead": 0.075
+          }
+        },
+        {
+          "id": "gemini-4-carbon",
+          "standard": {
+            "input": 2,
+            "output": 10,
+            "cacheWrite": null,
+            "cacheRead": 0.1
+          }
+        },
+        {
+          "id": "gemini-4-argon",
+          "standard": {
+            "input": 2,
+            "output": 10,
+            "cacheWrite": null,
+            "cacheRead": 0.1
+          }
+        },
+        {
+          "id": "gemini-3.8-flash",
+          "standard": {
+            "input": 0.75,
+            "output": 3.75,
+            "cacheWrite": null,
+            "cacheRead": 0.075
+          }
+        },
+        {
+          "id": "gemini-3-flash-preview",
+          "standard": {
+            "input": 0.5,
+            "output": 3,
+            "cacheWrite": null,
+            "cacheRead": 0.05
+          }
+        }
+      ]
+    },
+    {
+      "id": "grok",
+      "label": "Grok",
+      "factor": 0.43,
+      "models": [
+        {
+          "id": "grok-4.7",
+          "standard": {
+            "upTo": 200000,
+            "input": 2,
+            "output": 6,
+            "cacheWrite": null,
+            "cacheRead": 0.5
+          },
+          "long": {
+            "over": 200000,
+            "input": 4,
+            "output": 12,
+            "cacheWrite": null,
+            "cacheRead": 1
+          }
+        },
+        {
+          "id": "grok-4.6",
+          "standard": {
+            "upTo": 200000,
+            "input": 2,
+            "output": 6,
+            "cacheWrite": null,
+            "cacheRead": 0.5
+          },
+          "long": {
+            "over": 200000,
+            "input": 4,
+            "output": 12,
+            "cacheWrite": null,
+            "cacheRead": 1
+          }
+        },
+        {
+          "id": "grok-4.5",
+          "standard": {
+            "upTo": 200000,
+            "input": 2,
+            "output": 6,
+            "cacheWrite": null,
+            "cacheRead": 0.3
+          },
+          "long": {
+            "over": 200000,
+            "input": 4,
+            "output": 12,
+            "cacheWrite": null,
+            "cacheRead": 0.6
+          }
+        },
+        {
+          "id": "grok-build-0.1",
+          "standard": {
+            "upTo": 200000,
+            "input": 1,
+            "output": 2,
+            "cacheWrite": null,
+            "cacheRead": 0.2
+          },
+          "long": {
+            "over": 200000,
+            "input": 2,
+            "output": 4,
+            "cacheWrite": null,
+            "cacheRead": 0.4
+          }
+        }
+      ]
+    }
+  ]
+}

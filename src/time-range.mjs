@@ -226,13 +226,17 @@ export function aggregateRangeStats(sessions) {
     for (let modelIndex = 0; modelIndex < models.length; modelIndex += 1) {
       const model = models[modelIndex] ?? {};
       const provider = canonicalProvider(model.provider);
-      const key = `${provider ?? '?'}\u0000${model.model ?? '?'}\u0000${model.tier ?? ''}`;
+      // A provider card splits one model into standard / long rows; keeping the
+      // context tier in the key makes the browser recomputation agree with the
+      // server render, not just in the sum but in the row set too.
+      const key = `${provider ?? '?'}\u0000${model.model ?? '?'}\u0000${model.tier ?? ''}\u0000${model.contextTier ?? ''}`;
       let entry = map.get(key);
       if (entry === undefined) {
         entry = {
           provider,
           model: model.model ?? null,
           tier: model.tier ?? null,
+          contextTier: model.contextTier ?? null,
           priceKey: model.priceKey ?? null,
           priced: model.priced === true,
           tokens: zeroTokens(),
@@ -341,13 +345,14 @@ export function aggregateDayStats(days) {
       for (let modelIndex = 0; modelIndex < models.length; modelIndex += 1) {
         const model = models[modelIndex] ?? {};
         const provider = canonicalProvider(model.provider);
-        const key = `${provider ?? '?'}\u0000${model.model ?? '?'}\u0000${model.tier ?? ''}`;
+        const key = `${provider ?? '?'}\u0000${model.model ?? '?'}\u0000${model.tier ?? ''}\u0000${model.contextTier ?? ''}`;
         let entry = modelMap.get(key);
         if (entry === undefined) {
           entry = {
             provider,
             model: model.model ?? null,
             tier: model.tier ?? null,
+            contextTier: model.contextTier ?? null,
             priceKey: model.priceKey ?? null,
             priced: model.priced === true,
             tokens: zeroTokens(),
@@ -388,6 +393,7 @@ export function aggregateDayStats(days) {
       provider: entry.provider,
       model: entry.model,
       tier: entry.tier ?? null,
+      contextTier: entry.contextTier ?? null,
       priceKey: entry.priceKey,
       priced: entry.priced,
       tokens: entry.tokens,
@@ -459,6 +465,7 @@ function renderModelTable(doc, models, messages) {
     var modelName = model.model === null || model.model === undefined ? 'unknown' : model.model;
     if (model.tier === 'peak') modelName = modelName + (uiText(messages, 'model.peak') || '（峰值）');
     else if (model.tier === 'off') modelName = modelName + (uiText(messages, 'model.off') || '（谷值）');
+    if (model.contextTier === 'long') modelName = modelName + (uiText(messages, 'model.longTag') || '（长档）');
     html += '<tr>' +
       '<td class="mono">' + escapeHtml(modelName) + '</td>' +
       '<td class="muted">' + escapeHtml(model.provider === null || model.provider === undefined ? '—' : model.provider) + '</td>' +

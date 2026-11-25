@@ -19,9 +19,11 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { MESSAGES, LOCALES, normalizeLocale } from '../src/i18n.mjs';
 import { buildReport } from '../src/report-data.mjs';
-import { normalizePricing } from '../src/pricing.mjs';
+import { loadUsdPricing, normalizePricing } from '../src/pricing.mjs';
+import { loadProviderPricing } from '../src/provider-pricing.mjs';
 import { renderHtml } from '../src/report-html.mjs';
 import { renderLiveDocument } from '../src/live.mjs';
+import { renderProviderPage } from '../src/pricing-pages.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_ROOT = resolve(HERE, '..');
@@ -167,6 +169,14 @@ function checkRender(root) {
   if (HAN.test(visibleText(live))) {
     problems.push('English live page still contains Chinese characters:');
     for (const line of hanSamples(live)) problems.push('    ' + line);
+  }
+  // Provider price pages are a second rendering surface: a hardcoded Chinese
+  // note there would otherwise only show up in an English browser.
+  const card = loadProviderPricing();
+  const providerPage = card === null ? null : renderProviderPage({ id: card.provider, report, card, usdPricing: loadUsdPricing(), pricing: null, locale: 'en' });
+  if (providerPage !== null && HAN.test(visibleText(providerPage))) {
+    problems.push('English provider price page still contains Chinese characters:');
+    for (const line of hanSamples(providerPage)) problems.push('    ' + line);
   }
   return problems;
 }

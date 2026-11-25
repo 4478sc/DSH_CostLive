@@ -8,6 +8,8 @@ import { formatMoney } from './money.mjs';
 import { loadPricing, loadUsdPricing, formatCny, priceTier, resolvePrice } from './pricing.mjs';
 import { buildReport, toCsv } from './report-data.mjs';
 import { renderHtml } from './report-html.mjs';
+import { providerPageFileName, writeProviderPages } from './pricing-pages.mjs';
+import { loadProviderPricing } from './provider-pricing.mjs';
 import { renderDetail, renderList, renderModels, verifyProjection } from './report-text.mjs';
 import { discoverSessions, matchSession, readSession } from './sessions.mjs';
 import { applyOfficialOverlay, loadOfficialReport, loadOfficialState, officialWindowTotals } from './opencode-usage.mjs';
@@ -130,7 +132,7 @@ function parseDateBound(value, endOfDay) {
 }
 
 /** Analyze every discovered session; unreadable logs are reported, never fatal. */
-function analyzeAll(descriptors, pricing, usdPricing, options) {
+function analyzeAll(descriptors, pricing, usdPricing, providerPricing, options) {
   const results = [];
   for (const descriptor of descriptors) {
     try {
@@ -138,7 +140,7 @@ function analyzeAll(descriptors, pricing, usdPricing, options) {
       meta.source = descriptor.source ?? null;
       meta.sourceHome = descriptor.sourceHome ?? null;
       if (badLines > 0 && options.verbose) process.stderr.write(`warning: ${meta.id}: skipped ${badLines} malformed log line(s)\n`);
-      const analysis = analyzeEvents(events, pricing, usdPricing);
+      const analysis = analyzeEvents(events, pricing, usdPricing, providerPricing);
       results.push({ meta, analysis, projection });
     } catch (error) {
       process.stderr.write(`warning: cannot read ${descriptor.logPath}: ${error.message}\n`);
@@ -180,6 +182,28 @@ function writeOut(path, content) {
   return target;
 }
 
+/**
+ * Write an HTML report plus its provider price pages, so every link in the
+ * "price cards by provider" section resolves on a file:// document too.
+ */
+function writeHtmlReport(report, outFile, pricing, usdPricing) {
+  // A file:// report cannot resolve /pricing/<id>, so its links target the
+  // companion files that writeProviderPages() places next to it.
+  const target = writeOut(outFile, renderHtml(report, { pricingHref: providerPageFileName }));
+  let card = null;
+  try {
+    card = loadProviderPricing();
+  } catch {
+    card = null;
+  }
+  try {
+    writeProviderPages({ outPath: target, report, card, usdPricing, pricing: report.pricing ?? pricing });
+  } catch {
+    /* the report is still complete without its companion pages */
+  }
+  return target;
+}
+
 /** Entry point; returns the process exit code. */
 export function main(argv = process.argv.slice(2)) {
   let parsed;
@@ -204,9 +228,13 @@ export function main(argv = process.argv.slice(2)) {
 
   let pricing;
   let usdPricing;
+  let providerPricing;
   try {
     pricing = loadPricing(options.pricing === undefined ? undefined : resolve(options.pricing));
     usdPricing = loadUsdPricing(options.usd === undefined ? undefined : resolve(options.usd));
+    // The provider card prices only its own route; without it the CLI would fall
+    // back to the legacy table and disagree with the live dashboard.
+    providerPricing = loadProviderPricing();
   } catch (error) {
     process.stderr.write(`dsh-cost: ${error.message}\n`);
     return 2;
@@ -254,7 +282,10 @@ export function main(argv = process.argv.slice(2)) {
       if (command === 'session' || options.verify || options.steps) throw new Error('Real pricing is provider-level; session/steps/verify require usage mode');
       const report = collectLiveReport({ sources: options.source, sourcesPath: options.sources, home: options.home, billingPath: options.billing, billingMode: mode, pricingDocument: pricing, usdPricingDocument: usdPricing, official: false, since: options.since, until: options.until, model: options.model, workspace: options.workspace, top: options.top, pricedOnly: options['priced-only'] });
       const text = format === 'json' ? JSON.stringify(report, null, 2) + '\n' : format === 'csv' ? toCsv(report) : format === 'html' ? renderHtml(report) : ['Real price · Asia/Shanghai · provider-level subscription amortization', ...report.providers.map((row) => row.provider + '  ' + formatMoney(row.costMicroCny, row.costMicroUsd) + '  ' + row.tokens.totalTokens + ' tokens'), 'TOTAL  ' + formatMoney(report.summary.costMicroCny, report.summary.costMicroUsd)].join('\n') + '\n';
-      if (options.out || format === 'html') process.stdout.write('Report: ' + writeOut(options.out ?? 'dsh-cost-report.html', text) + '\n');
+      if (options.out || format === 'html') {
+        const written = format === 'html' ? writeHtmlReport(report, options.out ?? 'dsh-cost-report.html', pricing, usdPricing) : writeOut(options.out, text);
+        process.stdout.write('Report: ' + written + '\n');
+      }
       else process.stdout.write(text);
       return 0;
     }
@@ -309,7 +340,7 @@ export function main(argv = process.argv.slice(2)) {
   let results;
   let official = null;
   try {
-    results = filterResults(analyzeAll(selected, pricing, usdPricing, options), options);
+    results = filterResults(analyzeAll(selected, pricing, usdPricing, providerPricing, options), options);
     try {
       const officialReport = loadOfficialReport({
         officialPath: options.official,
@@ -381,7 +412,7 @@ export function main(argv = process.argv.slice(2)) {
   }
   if (format === 'html') {
     const report = attachOfficial(buildReport({ home, sources: sourceStats, pricing, results, generatedAt }));
-    const target = writeOut(options.out ?? 'dsh-cost-report.html', renderHtml(report));
+    const target = writeHtmlReport(report, options.out ?? 'dsh-cost-report.html', pricing, usdPricing);
     process.stdout.write(`HTML 报告已生成: ${target}\n`);
     process.stdout.write(`会话 ${report.summary.sessions} 个 · 总费用 ${formatMoney(report.summary.costMicroCny, report.summary.costMicroUsd)} · Token ${report.summary.totalTokens.toLocaleString('en-US')}\n`);
     return 0;

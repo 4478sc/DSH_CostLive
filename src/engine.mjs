@@ -31,6 +31,13 @@ import { sortCostMicro } from './money.mjs';
 
 /** The last provider usage sample embedded in an assistant settlement's stream. */
 export function usageFromEvent(event) {
+  if (event.type === 'compaction/summary') {
+    // A compaction summary is its own billed provider call: it carries its own
+    // provider/model/usage and is unrelated to any streaming chat sample.
+    const value = event.data?.usage;
+    if (value !== undefined && value !== null && typeof value === 'object') return value;
+    return undefined;
+  }
   if (event.type === 'assistant/message') {
     const value = event.data?.usage;
     if (value !== undefined && value !== null && typeof value === 'object') return value;
@@ -110,6 +117,14 @@ export function analyzeEvents(events, pricing, usdPricing = null, providerPricin
         if (last !== null && last.turn === event.data?.turn && last.step === event.data?.step) last = null;
         continue;
       }
+      case 'compaction/start': {
+        // DSH numbers the attempt that triggered a compaction and the settlement
+        // that follows it with the same turn/step, but the provider bills them as
+        // two requests. Closing the replacement scope here keeps the aborted
+        // attempt's reported usage instead of letting the next settlement erase it.
+        last = null;
+        continue;
+      }
       default: {
         const usage = usageFromEvent(event);
         if (usage === undefined) continue;
@@ -117,33 +132,38 @@ export function analyzeEvents(events, pricing, usdPricing = null, providerPricin
         const buckets = bucketsFromUsage(usage);
         const turn = Number.isInteger(event.data?.turn) ? event.data.turn : 0;
         const step = Number.isInteger(event.data?.step) ? event.data.step : 0;
+        // A compaction summary carries its own route and is a standalone billed
+        // call: it never replaces, and is never replaced by, a chat settlement.
+        const compaction = event.type === 'compaction/summary';
+        const sampleProvider = compaction && typeof event.data?.provider === 'string' ? event.data.provider : active.provider;
+        const sampleModel = compaction && typeof event.data?.model === 'string' ? event.data.model : active.model;
         // opencode/opencode-go is billed by the OpenCode console: its cost only
         // exists as official USD rows, so the CNY table must stay out of it.
-        const officialProvider = isOfficialProvider(active.provider);
+        const officialProvider = isOfficialProvider(sampleProvider);
         // A provider-scoped card outranks every shared table: the same model id
         // can be quoted differently by two routes, and only the route that
         // actually served the request may price it. Other providers keep the
         // exact tables they had before.
         const card = officialProvider
           ? null
-          : priceProviderSample({ doc: providerPricing, provider: active.provider, model: active.model, buckets });
+          : priceProviderSample({ doc: providerPricing, provider: sampleProvider, model: sampleModel, buckets });
         const cardRates = card !== null && card.status === 'price' ? billableRates(card) : null;
-        const lookup = officialProvider || card !== null ? null : resolvePrice(active.model, pricing);
+        const lookup = officialProvider || card !== null ? null : resolvePrice(sampleModel, pricing);
         const resolved = lookup;
         // Dollar-billed routes (codex) are costed from the USD list price and
         // never from the CNY table, so the two currencies stay separate.
-        const tierLookup = officialProvider ? resolvePrice(active.model, pricing) : lookup;
+        const tierLookup = officialProvider ? resolvePrice(sampleModel, pricing) : lookup;
         const usdResolved =
-          !officialProvider && card === null && isUsdProvider(active.provider, usdPricing)
-            ? resolveUsdPrice(active.model, usdPricing)
+          !officialProvider && card === null && isUsdProvider(sampleProvider, usdPricing)
+            ? resolveUsdPrice(sampleModel, usdPricing)
             : null;
         const record = {
           seq: event.seq,
           time: event.time,
           turn,
           step,
-          provider: active.provider,
-          model: active.model,
+          provider: sampleProvider,
+          model: sampleModel,
           priceKey:
             officialProvider
               ? 'opencode-pending'
@@ -189,16 +209,18 @@ export function analyzeEvents(events, pricing, usdPricing = null, providerPricin
         };
         if (card !== null && card.status === 'ambiguous') {
           warnings.push(
-            `ambiguous price for model "${active.model}" (provider ${active.provider}): tiers ${card.tiers.map((tier) => tier.id).join('/')} overlap at ${card.contextTokens} prompt tokens`,
+            `ambiguous price for model "${sampleModel}" (provider ${sampleProvider}): tiers ${card.tiers.map((tier) => tier.id).join('/')} overlap at ${card.contextTokens} prompt tokens`,
           );
         }
-        if (!officialProvider && !card && !resolved && !usdResolved && active.model) warnings.push(`no price for model "${active.model}" (provider ${active.provider ?? 'unknown'})`);
-        if (last !== null && last.turn === turn && last.step === step) {
+        if (!officialProvider && !card && !resolved && !usdResolved && sampleModel) warnings.push(`no price for model "${sampleModel}" (provider ${sampleProvider ?? 'unknown'})`);
+        if (!compaction && last !== null && last.turn === turn && last.step === step) {
           if (bucketsEqual(records[last.index].buckets, buckets)) continue;
           records[last.index] = record;
         } else {
           records.push(record);
-          last = { turn, step, index: records.length - 1 };
+          // Compaction rows are keyed by their own call, not by turn/step: they
+          // must never become a replacement target for the next settlement.
+          if (!compaction) last = { turn, step, index: records.length - 1 };
         }
       }
     }

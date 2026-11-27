@@ -16,10 +16,11 @@ function shiftDay(day, delta) {
 }
 
 /**
- * Natural period end: the same day next month, clamped to that month's last day
- * (2026-01-31 -> 2026-02-28, 2028-01-31 -> 2028-02-29).
+ * Natural period expiry, exclusive: the same day next month, clamped to that
+ * month's last day when the day does not exist (2026-01-31 -> 2026-02-28,
+ * 2028-01-31 -> 2028-02-29). The expiry day itself is never billed.
  */
-function nextMonthSameDay(day) {
+function nextMonthExpiry(day) {
   const time = new Date(dayTime(day));
   const year = time.getUTCFullYear();
   const month = time.getUTCMonth() + 1;
@@ -30,20 +31,24 @@ function nextMonthSameDay(day) {
 }
 
 /**
- * One explicit record is one payment covering [start, end] inclusive. A later
- * record of the SAME provider that starts on or before the natural end truncates
- * the older period to the day before, so a renewed day belongs to the new period
- * only and an early renewal never double-charges. Nothing renews implicitly:
- * without a later record the period simply ends and the following days are free.
+ * One explicit record is one payment covering [start, expiry): every day from
+ * the start through the day before the expiry is billed. A later record of the
+ * SAME provider that starts before the expiry truncates the older period to the
+ * day before, so a renewed day belongs to the new period only and an early
+ * renewal never double-charges. A later record after the expiry leaves the gap
+ * unbilled. Nothing renews implicitly: without a later record the period simply
+ * ends and the following days are free. `end` is the last billed day
+ * (inclusive) while `expiresOn` is the exclusive expiry, so copy can name both.
  */
 export function billingPeriods(history) {
   const periods = [];
   for (let index = 0; index < history.length; index += 1) {
     const start = history[index].effectiveFrom;
     const next = index + 1 < history.length ? history[index + 1].effectiveFrom : null;
-    const naturalEnd = nextMonthSameDay(start);
-    const end = next !== null && next <= naturalEnd ? shiftDay(next, -1) : naturalEnd;
-    periods.push({ start, end, monthlyUsd: history[index].monthlyUsd, naturalEnd, days: Math.round((dayTime(end) - dayTime(start)) / 86400000) + 1 });
+    const expiresOn = nextMonthExpiry(start);
+    const naturalEnd = shiftDay(expiresOn, -1);
+    const end = next !== null && next < expiresOn ? shiftDay(next, -1) : naturalEnd;
+    periods.push({ start, end, expiresOn, monthlyUsd: history[index].monthlyUsd, days: Math.round((dayTime(end) - dayTime(start)) / 86400000) + 1 });
   }
   return periods;
 }
@@ -193,5 +198,5 @@ export function subscriptionReport(usage, config, options = {}) {
 }
 
 export function billingRuntimeSource() {
-  return [shanghaiDay, dayTime, shiftDay, nextMonthSameDay, billingPeriods, periodDayMicro, subscriptionReport].map((fn) => fn.toString()).join('\n') + '\nwindow.DSH_BILLING = { shanghaiDay: shanghaiDay, periods: billingPeriods, calculate: subscriptionReport };';
+  return [shanghaiDay, dayTime, shiftDay, nextMonthExpiry, billingPeriods, periodDayMicro, subscriptionReport].map((fn) => fn.toString()).join('\n') + '\nwindow.DSH_BILLING = { shanghaiDay: shanghaiDay, periods: billingPeriods, calculate: subscriptionReport };';
 }

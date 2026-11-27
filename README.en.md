@@ -62,10 +62,10 @@ collect / price / render code as the report, so page numbers always match the CL
 
 Open "Billing settings" and record each OpenCode and Codex subscription or renewal: **every record is one single-period payment** in USD with its start date. Then use the "Usage pricing / Real price" buttons above the editor to switch instantly without saving again; mode changes never save unsubmitted edits. Each provider needs at least one record; use 0 for no subscription, not a blank. Any calendar day is a valid start (mid-month included), same-price renewals are ordinary records, and existing records are never copied into invented renewals.
 
-- **One record = one period**: from its start date (inclusive) through the same day next month (inclusive). That period's day count is the amortization denominator. When the next month has no such day the period is clamped to its last day: `Jan 31 → Feb 28` (`Feb 29` in a leap year), `Mar 31 → Apr 30`.
-- **Renewal on the expiry day**: another record of the same provider starting that day drops the day from the old period, so the day is charged only by the new period (which runs to the same day of the following month).
-- **Renewal after the expiry day**: the old period still includes the expiry day; the gap between the expiry day and the new start date is free.
-- **No renewal**: once a period ends nothing more is charged — **nothing renews implicitly**.
+- **One record = one period**: billed over `[start, same day next month)`. The start day is billed and the expiry day is not, so the last billed day is the day before the expiry; that period's day count is the amortization denominator. When the next month has no such day the month end becomes the exclusive expiry too: a `Jan 31` start bills through `Feb 27` and `Feb 28` is the expiry (`Feb 29` in a leap year); a `Mar 31` start bills through `Apr 29` and `Apr 30` is the expiry.
+- **Renewal on the expiry day**: the old period already ends the day before, so a same-provider record starting on that day charges the day only through the new period (which runs until the same day of the following month, exclusive).
+- **Renewal after the expiry day**: the old period ends the day before the expiry, and the gap from the expiry day to the new start date is free.
+- **No renewal**: the expiry day and every later day cost nothing — **nothing renews implicitly**.
 - **Renewal before the expiry day**: to avoid charging one provider twice, the old period ends the day before the new start, and its payment is still spread over exactly the days it covers (so its daily rate rises); the new period starts on its own date. Only same-provider records truncate a period, never another provider's records.
 - Daily amount = that payment ÷ the period's full covered day count. The denominator never shrinks with the selected range or with "today"; today counts in full and future days are not charged. Cumulative rounded micro-USD shares make a whole period add up to the amount paid exactly, so display rounding never decides a total.
 - Today / 7 days / 30 days / All time use **Asia/Shanghai** sample dates, not session creation dates. Days without tokens still incur subscription cost, reported as idle cost.
@@ -82,7 +82,7 @@ Both CLI entry points accept --billing <file> and --billing-mode usage|real. In 
 
 Settings writes require a **loopback connection**, same-origin JSON PUT /api/billing and X-CostLive-Settings: 1. LAN access is read-only: CSRF checks are not authentication. Use an SSH local port forward and localhost for remote administration; never expose the unauthenticated report service publicly. The endpoint only writes local CostLive settings, never DSH logs or credentials.
 
-See [billing.example.json](config/billing.example.json): opencode's `2026-11-01` and `2026-12-01` records (both 20 USD) show a same-day renewal (11/01–11/30 and 12/01–2027/01/01), while codex's single `2026-11-15` record (100 USD) shows no renewal (11/15–12/15 inclusive, then no cost). For a VM frontend, copy config/vm-dashboard.example.json to ignored config/vm-dashboard.local.json and set the SSH target, key path and existing host push-loop script. The dsh-cost-live.cmd launcher starts a reconnecting SSH forward and uploader instead of a second accounting backend; the existing ensure-host-sync watchdog uses the same mode. Port 4173 conflicts are reported without killing unrelated processes. Example prices are not your actual fees.
+See [billing.example.json](config/billing.example.json): opencode's `2026-11-01` and `2026-12-01` records (both 20 USD) show a same-day renewal (11/01–11/30 and 12/01–12/31, with 12/01 charged only by the new period), while codex's single `2026-11-15` record (100 USD) shows no renewal (11/15–12/14 inclusive, 12/15 is the exclusive expiry, then no cost). For a VM frontend, copy config/vm-dashboard.example.json to ignored config/vm-dashboard.local.json and set the SSH target, key path and existing host push-loop script. The dsh-cost-live.cmd launcher starts a reconnecting SSH forward and uploader instead of a second accounting backend; the existing ensure-host-sync watchdog uses the same mode. Port 4173 conflicts are reported without killing unrelated processes. Example prices are not your actual fees.
 
 ---
 
@@ -541,7 +541,7 @@ DSH_CostLive/
 │  ├─ live.mjs                # live document / fragment / atomic write
 │  ├─ live-server.mjs         # local HTTP server: page, APIs and /pricing/<id>
 │  └─ live-client.js          # browser side: polling, folding, ranges, scroll restore
-├─ test/                      # node:test, 14 files, 151 cases + the Windows regression test
+├─ test/                      # node:test, 15 files, 158 cases + the Windows regression test
 ├─ tools/make-demo-home.mjs   # synthetic demo data generator
 ├─ tools/sync-vm-dsh.ps1      # incremental ~/.dsh → .dsh-vm sync from a VMware VM
 ├─ tools/vm-sync-snapshot.sh  # VM-side incremental packer
@@ -570,6 +570,7 @@ npm test
 |---|---:|---|
 | `pricing.test.mjs` | 12 | Table normalization, aliases, wildcards, peak tiers, micro-CNY precision, built-in table parity |
 | `engine.test.mjs` | 15 | Streaming replacement, retries, four-bucket merge, zero usage, model switches, opencode pending |
+| `compaction-usage.test.mjs` | 7 | Compaction summaries billed as their own call, two summaries under one turn/step both billed, summary route from the event, overflow attempt kept, streaming sample still replaced by its settlement, zero usage makes no row |
 | `activity.test.mjs` | 8 | `openStep` authority, `turnBoundary` fallback, dual-channel subagent detection, stable three-bucket ordering |
 | `time-range.test.mjs` | 22 | Range boundaries, missing dates, aggregation arithmetic, browser runtime, DOM events, storage fallbacks, HTML integration |
 | `daily.test.mjs` | 11 | Midnight split, unknown-time bucket, calendar boundaries, daily de-duplication, by-day DOM and storage |
@@ -582,7 +583,7 @@ npm test
 | `zstd.test.mjs` | 2 | Multi-frame decompression, plain JSONL fallback |
 | `parent-session.test.mjs` | 10 | Parent id normalization, per-source resolution, parent outside the range, nested parents, missing/untitled fallbacks, role markers in both views, HTML escaping, dataset fields |
 | `provider-pricing.test.mjs` | 22 | Full AICodeMirror transcription (30 models / 43 tiers), four factors, provider isolation, 272K/200K and cache-bucket boundaries, ambiguous overlap, no double booking, price pages/links/static companions/escaping |
-| **Total (`npm test`)** | **151** | |
+| **Total (`npm test`)** | **158** | |
 
 `npm run test:ps` adds 45 Windows-targeted regression cases: windowless start (GUI host + CREATE_NO_WINDOW),
 argument quoting with spaces and quotes, the single-instance mutex, the offline retry ramp, the VBS entry point and
@@ -643,6 +644,7 @@ More troubleshooting in [`LIVE.md`](LIVE.md).
 | [`LIVE.md`](LIVE.md) | Live dashboard: three modes, page behaviour, API, every flag, troubleshooting, security |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Data flow, module responsibilities, invariants, extension points |
 | [`docs/DSH-TOKEN-ACCOUNTING.md`](docs/DSH-TOKEN-ACCOUNTING.md) | How DSH counts tokens (events, projections, replacement/retry rules) |
+| [`docs/compaction-usage.md`](docs/compaction-usage.md) | Why compaction usage is billed separately, the fold rules, the gap against the official projection, and how to avoid double counting |
 | [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) | Development notes: pitfalls, debugging commands, acceptance checklist, ideas |
 | [`docs/host-sync-windowless.md`](docs/host-sync-windowless.md) | Windowless host→VM sync chain: root cause, call chain, task wiring, rollback, regression tests, measured evidence |
 | [`docs/host-sync-watchdog.md`](docs/host-sync-watchdog.md) | Bounded host→VM uploads, process-tree cleanup, heartbeat watchdog: failure timeline, wiring and config, rollback, regression tests |

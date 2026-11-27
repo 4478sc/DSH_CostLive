@@ -58,26 +58,28 @@ test('subscription configuration accepts any calendar start, validates dates, ce
   assert.equal(unsorted.subscriptions.codex.length, 1);
 });
 
-test('one record is one period: same day next month, clamped to the month end, billed to the cent', () => {
+test('one record is one period: [start, same day next month), month-end expiry excluded, billed to the cent', () => {
   const cases = [
-    ['2026-02-01', '2026-03-01', 29],
-    ['2028-02-01', '2028-03-01', 30],
-    ['2026-11-01', '2026-12-01', 31],
-    ['2026-12-01', '2027-01-01', 32],
-    ['2026-01-31', '2026-02-28', 29],
-    ['2028-01-31', '2028-02-29', 30],
-    ['2026-03-31', '2026-04-30', 31],
-    ['2026-05-15', '2026-06-15', 32],
-    ['2026-12-20', '2027-01-20', 32],
+    ['2026-02-01', '2026-02-28', '2026-03-01', 28],
+    ['2028-02-01', '2028-02-29', '2028-03-01', 29],
+    ['2026-11-01', '2026-11-30', '2026-12-01', 30],
+    ['2026-12-01', '2026-12-31', '2027-01-01', 31],
+    ['2026-01-31', '2026-02-27', '2026-02-28', 28],
+    ['2028-01-31', '2028-02-28', '2028-02-29', 29],
+    ['2026-03-31', '2026-04-29', '2026-04-30', 30],
+    ['2026-05-15', '2026-06-14', '2026-06-15', 31],
+    ['2026-12-20', '2027-01-19', '2027-01-20', 31],
   ];
-  for (const [start, end, days] of cases) {
+  for (const [start, end, expires, days] of cases) {
     const [period] = billingPeriods([{ effectiveFrom: start, monthlyUsd: 19.99 }]);
     assert.equal(period.start, start);
-    assert.equal(period.end, end, start + ' end');
+    assert.equal(period.end, end, start + ' last billed day');
+    assert.equal(period.expiresOn, expires, start + ' exclusive expiry');
     assert.equal(period.days, days, start + ' days');
-    const report = subscriptionReport([], real([{ effectiveFrom: start, monthlyUsd: 19.99 }], [{ effectiveFrom: start, monthlyUsd: 0 }]), { now: at(end) });
-    assert.equal(report.days.length, days);
+    const report = subscriptionReport([], real([{ effectiveFrom: start, monthlyUsd: 19.99 }], [{ effectiveFrom: start, monthlyUsd: 0 }]), { now: at(expires) });
+    assert.equal(report.days.length, days, start + ' expiry day is excluded');
     assert.equal(report.days[0].day, end);
+    assert.equal(report.days.some((day) => day.day === expires), false, start + ' never bills its expiry day');
     assert.equal(report.summary.costMicroUsd, 19990000, start + ' total equals the payment');
     assert.equal(report.summary.idleMicroUsd, 19990000);
     assert.equal(report.summary.tokenPrice.usdMicroPerM, null);
@@ -86,21 +88,25 @@ test('one record is one period: same day next month, clamped to the month end, b
   }
 });
 
-test('nothing renews implicitly: the day after a period ends costs nothing', () => {
-  const report = subscriptionReport([], real([{ effectiveFrom: '2026-11-01', monthlyUsd: 30 }]), { now: at('2026-12-15') });
-  assert.equal(report.days.length, 31);
-  assert.equal(report.days[0].day, '2026-12-01');
+test('nothing renews implicitly: the expiry day and all later days cost nothing', () => {
+  const cfg = real([{ effectiveFrom: '2026-11-01', monthlyUsd: 30 }]);
+  const report = subscriptionReport([], cfg, { now: at('2026-12-15') });
+  assert.equal(report.days.length, 30);
+  assert.equal(report.days[0].day, '2026-11-30');
   assert.equal(report.days[report.days.length - 1].day, '2026-11-01');
   assert.equal(report.summary.costMicroUsd, 30000000);
-  assert.equal(report.days.some((day) => day.day > '2026-12-01'), false);
+  const expiry = subscriptionReport([], cfg, { now: at('2026-12-01') });
+  assert.equal(expiry.days.length, 30, 'the exclusive expiry day is not billed');
+  assert.equal(expiry.days[0].day, '2026-11-30');
+  assert.equal(expiry.summary.costMicroUsd, 30000000);
 });
 
-test('a same-day renewal moves the expiry day into the new period only', () => {
+test('a renewal on the exclusive expiry day belongs to the new period only', () => {
   const history = [{ effectiveFrom: '2026-11-01', monthlyUsd: 30 }, { effectiveFrom: '2026-12-01', monthlyUsd: 30 }];
   const periods = billingPeriods(history);
-  assert.deepEqual(periods.map((period) => [period.start, period.end, period.days]), [
-    ['2026-11-01', '2026-11-30', 30],
-    ['2026-12-01', '2027-01-01', 32],
+  assert.deepEqual(periods.map((period) => [period.start, period.end, period.expiresOn, period.days]), [
+    ['2026-11-01', '2026-11-30', '2026-12-01', 30],
+    ['2026-12-01', '2026-12-31', '2027-01-01', 31],
   ]);
   const report = subscriptionReport([], real(history), { now: at('2027-01-15') });
   const november = report.days.filter((day) => day.day < '2026-12-01').reduce((sum, day) => sum + rowCost(day), 0);
@@ -108,21 +114,21 @@ test('a same-day renewal moves the expiry day into the new period only', () => {
   assert.equal(november, 30000000);
   assert.equal(december, 30000000);
   assert.equal(rowCost(findDay(report, '2026-11-30')), share(30, 30, 30));
-  assert.equal(rowCost(findDay(report, '2026-12-01')), share(30, 1, 32), 'the renewal day is charged once, by the new period');
+  assert.equal(rowCost(findDay(report, '2026-12-01')), share(30, 1, 31), 'the renewal day is charged once, by the new period');
   assert.equal(findDay(report, '2026-12-01').providers.filter((row) => row.provider === 'opencode').length, 1);
 });
 
-test('a late renewal keeps the expiry day and leaves an unbilled gap that costs nothing', () => {
+test('a late renewal keeps the old period to the day before expiry and leaves an unbilled gap', () => {
   const history = [{ effectiveFrom: '2026-11-01', monthlyUsd: 30 }, { effectiveFrom: '2026-12-10', monthlyUsd: 30 }];
   const periods = billingPeriods(history);
-  assert.deepEqual(periods.map((period) => [period.start, period.end, period.days]), [
-    ['2026-11-01', '2026-12-01', 31],
-    ['2026-12-10', '2027-01-10', 32],
+  assert.deepEqual(periods.map((period) => [period.start, period.end, period.expiresOn, period.days]), [
+    ['2026-11-01', '2026-11-30', '2026-12-01', 30],
+    ['2026-12-10', '2027-01-09', '2027-01-10', 31],
   ]);
   const report = subscriptionReport([], real(history), { now: at('2027-01-15') });
-  assert.equal(report.days.length, 31 + 32);
-  assert.equal(report.days.some((day) => day.day > '2026-12-01' && day.day < '2026-12-10'), false);
-  assert.equal(rowCost(findDay(report, '2026-12-01')), share(30, 31, 31), 'the expiry day stays with the old period');
+  assert.equal(report.days.length, 30 + 31);
+  assert.equal(report.days.some((day) => day.day > '2026-11-30' && day.day < '2026-12-10'), false);
+  assert.equal(rowCost(findDay(report, '2026-11-30')), share(30, 30, 30), 'the last billed day is the day before the exclusive expiry');
   assert.equal(providerCost(report), 60000000);
   // Usage inside the gap still appears, without any subscription cost.
   const gapped = subscriptionReport([{ day: '2026-12-05', provider: 'opencode', tokens: tokens(10) }], real(history), { now: at('2027-01-15') });
@@ -134,9 +140,9 @@ test('a late renewal keeps the expiry day and leaves an unbilled gap that costs 
 test('an earlier renewal truncates the old period and still charges its whole payment', () => {
   const history = [{ effectiveFrom: '2026-11-01', monthlyUsd: 30 }, { effectiveFrom: '2026-11-20', monthlyUsd: 45 }];
   const periods = billingPeriods(history);
-  assert.deepEqual(periods.map((period) => [period.start, period.end, period.days]), [
-    ['2026-11-01', '2026-11-19', 19],
-    ['2026-11-20', '2026-12-20', 31],
+  assert.deepEqual(periods.map((period) => [period.start, period.end, period.expiresOn, period.days]), [
+    ['2026-11-01', '2026-11-19', '2026-12-01', 19],
+    ['2026-11-20', '2026-12-19', '2026-12-20', 30],
   ]);
   const report = subscriptionReport([], real(history), { now: at('2026-12-31') });
   const old = report.days.filter((day) => day.day < '2026-11-20').reduce((sum, day) => sum + rowCost(day), 0);
@@ -145,16 +151,16 @@ test('an earlier renewal truncates the old period and still charges its whole pa
   assert.equal(next, 45000000);
   assert.equal(report.summary.costMicroUsd, 75000000);
   // Only the newer record owns the renewal day, so no provider day is billed twice.
-  assert.equal(rowCost(findDay(report, '2026-11-20')), share(45, 1, 31));
+  assert.equal(rowCost(findDay(report, '2026-11-20')), share(45, 1, 30));
   assert.equal(rowCost(findDay(report, '2026-11-19')), share(30, 19, 19));
   assert.ok(rowCost(findDay(report, '2026-11-19')) > rowCost(findDay(report, '2026-11-20')), 'a shortened period raises its daily rate');
   // Another provider never truncates this provider's period.
   const mixed = real(history, [{ effectiveFrom: '2026-11-05', monthlyUsd: 60 }]);
-  assert.deepEqual(billingPeriods(mixed.subscriptions.opencode).map((period) => period.days), [19, 31]);
-  assert.deepEqual(billingPeriods(mixed.subscriptions.codex).map((period) => period.days), [31]);
+  assert.deepEqual(billingPeriods(mixed.subscriptions.opencode).map((period) => period.days), [19, 30]);
+  assert.deepEqual(billingPeriods(mixed.subscriptions.codex).map((period) => period.days), [30]);
   const both = subscriptionReport([], mixed, { now: at('2026-12-20') });
   assert.equal(rowCost(findDay(both, '2026-11-19')), share(30, 19, 19));
-  assert.equal(rowCost(findDay(both, '2026-11-19'), 'codex'), share(60, 15, 31));
+  assert.equal(rowCost(findDay(both, '2026-11-19'), 'codex'), share(60, 15, 30));
 
 });
 
@@ -164,17 +170,17 @@ test('the daily share divides by the full period, never by the filter window or 
   const today = subscriptionReport([], cfg, { now: at('2026-11-15'), range: 'today' });
   const week = subscriptionReport([], cfg, { now: at('2026-11-15'), range: '7d' });
   const bounds = subscriptionReport([], cfg, { now: at('2026-11-30'), since: '2026-11-14', until: '2026-11-15' });
-  const expected = share(30, 15, 31);
+  const expected = share(30, 15, 30);
   for (const report of [all, today, week, bounds]) {
     assert.equal(rowCost(findDay(report, '2026-11-15')), expected);
   }
   assert.equal(today.days.length, 1);
   assert.equal(week.days.length, 7);
   assert.equal(bounds.days.length, 2);
-  assert.equal(bounds.summary.costMicroUsd, share(30, 14, 31) + share(30, 15, 31));
-  assert.equal(all.summary.costMicroUsd, paidUpTo(30, 30, 31));
+  assert.equal(bounds.summary.costMicroUsd, share(30, 14, 30) + share(30, 15, 30));
+  assert.equal(all.summary.costMicroUsd, paidUpTo(30, 30, 30));
   // A moved window keeps the same daily share: the 7-day total is the sum of its own days.
-  assert.equal(week.summary.costMicroUsd, paidUpTo(30, 15, 31) - paidUpTo(30, 8, 31));
+  assert.equal(week.summary.costMicroUsd, paidUpTo(30, 15, 30) - paidUpTo(30, 8, 30));
 });
 
 test('Shanghai calendar days include today and never add future spend', () => {
@@ -183,7 +189,7 @@ test('Shanghai calendar days include today and never add future spend', () => {
   const report = subscriptionReport([], config(), { now: Date.parse('2026-11-01T16:00:00Z'), range: 'today' });
   assert.equal(report.until, '2026-11-02');
   assert.equal(report.days.length, 1);
-  assert.equal(findDay(report, '2026-11-02').providers[0].costMicroUsd, share(30, 2, 31));
+  assert.equal(findDay(report, '2026-11-02').providers[0].costMicroUsd, share(30, 2, 30));
   const capped = subscriptionReport([], config(), { now: at('2026-11-12'), until: '2026-11-30' });
   assert.equal(capped.until, '2026-11-12');
   assert.equal(capped.days.length, 12);
@@ -200,7 +206,7 @@ test('providers keep token averages while currency and idle cost stay separate',
   ];
   const usage = providerUsage(results);
   const report = subscriptionReport(usage, config(), { now: at('2026-11-01') });
-  assert.equal(report.summary.costMicroUsd, share(30, 1, 31) + share(60, 1, 31));
+  assert.equal(report.summary.costMicroUsd, share(30, 1, 30) + share(60, 1, 30));
   assert.equal(report.summary.tokens.totalTokens, 700);
   const codex = report.providers.find((row) => row.provider === 'codex');
   assert.equal(codex.tokens.totalTokens, 300);
@@ -212,11 +218,11 @@ test('providers keep token averages while currency and idle cost stay separate',
     { day: '2026-11-01', provider: 'proxy', tokens: tokens(1000000), costMicroCny: 2000000, cnyTokens: 1000000 },
   ], config(), { now: at('2026-11-02') });
   assert.equal(mixed.summary.costMicroCny, 2000000);
-  assert.equal(mixed.summary.costMicroUsd, paidUpTo(30, 2, 31) + paidUpTo(60, 2, 31));
+  assert.equal(mixed.summary.costMicroUsd, paidUpTo(30, 2, 30) + paidUpTo(60, 2, 30));
   assert.equal(mixed.summary.tokenPrice.cnyMicroPerM, 2000000);
   assert.equal(mixed.summary.tokenPrice.usdMicroPerM, mixed.summary.costMicroUsd);
   // codex bills both days but only day 2 is idle; opencode has no usage at all.
-  assert.equal(mixed.summary.idleMicroUsd, paidUpTo(30, 2, 31) + share(60, 2, 31));
+  assert.equal(mixed.summary.idleMicroUsd, paidUpTo(30, 2, 30) + share(60, 2, 30));
   const missing = subscriptionReport([{ day: '2026-10-31', provider: 'codex', tokens: tokens(10) }], config(), { now: at('2026-11-01') });
   assert.equal(missing.summary.configured, false);
   assert.equal(missing.summary.tokenPrice.usdMicroPerM, null);
@@ -236,8 +242,8 @@ test('legacy version-1 files keep their dates and amounts and are read as per-pa
     assert.equal(loaded.subscriptions.codex.length, 1, 'no renewal was invented for codex');
     const report = subscriptionReport([], loaded, { now: at('2026-12-31') });
     assert.equal(providerCost(report, 'codex'), 100000000);
-    assert.equal(report.days.filter((day) => rowCost(day, 'codex') > 0).length, 31);
-    assert.equal(providerCost(report, 'opencode'), 20000000 + paidUpTo(30, 31, 32));
+    assert.equal(report.days.filter((day) => rowCost(day, 'codex') > 0).length, 30);
+    assert.equal(providerCost(report, 'opencode'), 20000000 + paidUpTo(30, 31, 31));
     // An explicit save keeps the same shape and accepts a mid-month start.
     saveBilling(file, { mode: 'real', subscriptions: { opencode: [{ effectiveFrom: '2026-11-15', monthlyUsd: 12.5 }], codex: [{ effectiveFrom: '2026-11-15', monthlyUsd: 0 }] } });
     const saved = JSON.parse(readFileSync(file, 'utf8'));
@@ -259,10 +265,10 @@ test('billing settings show each payment, its covered days and the new copy', ()
   const settings = billingSettings(renewed(), 'zh');
   assert.match(settings, /单期订阅实付（USD）/);
   assert.match(settings, /本期生效日/);
-  assert.match(settings, /覆盖 2026-10-01 → 2026-10-31（含）· 31 天/);
-  assert.match(settings, /覆盖 2026-11-01 → 2026-12-01（含）· 31 天/);
+  assert.match(settings, /覆盖 2026-10-01 → 2026-10-31（含，最后计费日）· 31 天；2026-11-01 到期（不含）/);
+  assert.match(settings, /覆盖 2026-11-01 → 2026-11-30（含，最后计费日）· 30 天；2026-12-01 到期（不含）/);
   assert.equal((settings.match(/<fieldset data-billing-provider=/g) || []).length, 2);
-  assert.match(billingSettings(config(), 'en'), /Covers 2026-11-01 → 2026-12-01 \(inclusive\) · 31 days/);
+  assert.match(billingSettings(config(), 'en'), /Covers 2026-11-01 → 2026-11-30 \(inclusive, last billed day\) · 30 days; expires 2026-12-01 \(exclusive\)/);
   const script = billingClientSource();
   assert.match(script, /billing\.period/);
   assert.match(script, /billing\.duplicate/);
@@ -281,7 +287,7 @@ test('local config saves atomically and real live/CSV/static reports use the sha
   const f = fixture(); try {
     saveBilling(f.billingPath, config()); assert.equal(loadBilling(f.billingPath).mode, 'real');
     const report = collectLiveReport({ home: f.home, billingPath: f.billingPath, since: '2026-11-01', until: '2026-11-02', official: false });
-    const expected = (paidUpTo(30, 2, 31) + paidUpTo(60, 2, 31)) / 1e6;
+    const expected = (paidUpTo(30, 2, 30) + paidUpTo(60, 2, 30)) / 1e6;
     assert.ok(Math.abs(report.summary.costUsd - expected) < 1e-9);
     assert.equal(report.summary.totalTokens, 600); assert.equal(report.sessions.length, 0); assert.equal(report.referenceUsage.sessions.length, 1);
     assert.match(toCsv(report), /billing_mode/); assert.match(toCsv(report), /TOTAL/);
@@ -289,7 +295,7 @@ test('local config saves atomically and real live/CSV/static reports use the sha
     assert.match(html, /data-billing-mode="usage"/); assert.match(html, /data-billing-mode="real"/);
     assert.doesNotMatch(html, /data-billing-export|data-billing-import|data-real-export/);
     assert.match(html, /<th class="num">Token<\/th>/);
-    assert.match(html, /Covers 2026-11-01 → 2026-12-01 \(inclusive\) · 31 days/);
+    assert.match(html, /Covers 2026-11-01 → 2026-11-30 \(inclusive, last billed day\) · 30 days; expires 2026-12-01 \(exclusive\)/);
     assert.match(html, /Costs by provider/); assert.match(renderLiveDocument({ report, locale: 'en' }), /billing-form/);
     assert.equal(renderLiveFragment(report).dataset.billing.config.mode, 'real');
     const output = join(f.dir, 'report.json');

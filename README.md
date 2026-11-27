@@ -58,10 +58,10 @@ DSH 会把每个会话的完整事件流写进 `~/.dsh/sessions/` 下的 zstd �
 
 在实时页打开「计费设置」，为 OpenCode 和 Codex 各填写订阅/续费记录：**每条记录是一笔单期实付**（USD）及其生效日，保存后可用设置上方的「当前计费方式 / 真实价格」按钮一键切换，切换不会保存尚未提交的编辑。每个提供方至少一条记录；没有订阅请填 0，空白不代表 0。可补录任意有效日（含月中），同价续费照常录入；已有记录不会被自动复制或续写。
 
-- **一条记录 = 一个有效期**：从生效日（含）到次月同日（含），该有效期天数就是摊销分母。次月没有同号日就截到月末：`1/31 → 2/28`（闰年 `2/29`）、`3/31 → 4/30`。
-- **到期日当天续费**：同一提供方再录一笔同一天生效的记录，旧期不含这天，该日只算新期；新期从该日到再下月同日。
-- **到期日之后才续费**：旧期仍包含到期日，到期日与新记录生效日之间的空档日不计费。
-- **不续费**：到期后没有新记录就不产生费用，**不会隐式续期**。
+- **一条记录 = 一个有效期**：按 `[生效日, 次月同日)` 计费——生效日（含）到**到期日前一天（含）**是最后计费日，到期日（不含）当天不计费；该有效期天数就是摊销分母。次月没有同号日就用月末作到期日，到期日同样不计费：`1/31` 起算到 `2/27`（含）、`2/28` 到期不含（闰年 `2/29` 到期不含）；`3/31` 起算到 `4/29`（含）、`4/30` 到期不含。
+- **到期日当天续费**：同一提供方再录一笔同一天生效的记录，旧期本来就在到期日前一天结束，该日只算新期；新期从该日算到再下月同日（不含）。
+- **到期日之后才续费**：旧期到到期日前一天为止，到期日与新记录生效日之间的空档日不计费。
+- **不续费**：到期日当天起就不产生费用，**不会隐式续期**。
 - **到期日之前续费**：为避免同一提供方重复计费，旧期截到新期生效日前一天，旧费仍全额摊到它实际覆盖的那些天（日均因此变高），新期从自身生效日算起；只用同一提供方的记录截断，不会用另一提供方的记录。
 - 日额 = 该笔实付 ÷ 该期实际覆盖的完整天数，**不随筛选区间或「今天」缩短分母**；今天计完整一天，未来日期不计。微美元按累计日份额四舍五入求差，整期合计精确等于实付金额，UI 的显示舍入不决定总额。
 - 统一按 **Asia/Shanghai** 采样日期统计 Today / 7 天 / 30 天 / All time；不沿用会话创建日期。即使某天无 token，也收取订阅日额并显示闲置费用。
@@ -78,7 +78,7 @@ CLI 两个入口都支持 --billing <file> 和 --billing-mode usage|real；真�
 
 设置写入仅接受**回环连接**上的同源 JSON PUT /api/billing，并要求 X-CostLive-Settings: 1；局域网只读，不把 CSRF 检查误当作认证。远程管理请使用 SSH 本地端口转发后访问 localhost；不要把未鉴权的报告服务暴露到公网。该接口只改 CostLive 本地设置，不写 DSH 日志/凭据。
 
-示例配置见 [billing.example.json](config/billing.example.json)：opencode 的 `2026-11-01` 与 `2026-12-01` 两笔同价 20 美元演示「到期日当天续费」（分别覆盖 11/01–11/30、12/01–2027/01/01），codex 只有 `2026-11-15` 一笔 100 美元演示「不续费」（覆盖 11/15–12/15 含，之后不再计费）。VM前端模式：复制 config/vm-dashboard.example.json 为被忽略的 config/vm-dashboard.local.json，填写SSH目标、密钥路径与既有宿主机push-loop脚本路径。双击 dsh-cost-live.cmd 会启动可重连的SSH转发及上传循环，不启动第二个计费后端；已有 ensure-host-sync 看门狗也复用此模式。若4173端口被其他服务占用会报冲突，不会擅自终止进程。示例金额不代表你的真实订阅费。
+示例配置见 [billing.example.json](config/billing.example.json)：opencode 的 `2026-11-01` 与 `2026-12-01` 两笔同价 20 美元演示「到期日当天续费」（分别覆盖 11/01–11/30、12/01–12/31，12/01 到期日只算新期），codex 只有 `2026-11-15` 一笔 100 美元演示「不续费」（覆盖 11/15–12/14 含，12/15 到期不含，之后不再计费）。VM前端模式：复制 config/vm-dashboard.example.json 为被忽略的 config/vm-dashboard.local.json，填写SSH目标、密钥路径与既有宿主机push-loop脚本路径。双击 dsh-cost-live.cmd 会启动可重连的SSH转发及上传循环，不启动第二个计费后端；已有 ensure-host-sync 看门狗也复用此模式。若4173端口被其他服务占用会报冲突，不会擅自终止进程。示例金额不代表你的真实订阅费。
 
 ---
 
@@ -478,7 +478,7 @@ DSH_CostLive/
 │  ├─ live.mjs                # 实时页文档 / 片段 / 原子写入
 │  ├─ live-server.mjs         # 本地 HTTP 服务：页面、API 与 /pricing/<id>
 │  └─ live-client.js          # 浏览器端：轮询、折叠、范围、滚动恢复
-├─ test/                      # node:test 14 个文件 151 项 + Windows 回归测试
+├─ test/                      # node:test 15 个文件 158 项 + Windows 回归测试
 ├─ tools/make-demo-home.mjs   # 合成演示数据生成器
 ├─ tools/sync-vm-dsh.ps1      # 从 VMware VM 增量同步 ~/.dsh 到 .dsh-vm
 ├─ tools/vm-sync-snapshot.sh  # VM 端增量打包脚本
@@ -507,6 +507,7 @@ npm test
 |---|---:|---|
 | `pricing.test.mjs` | 12 | 价格归一、别名、通配、峰谷判定、micro-CNY 精度、内置表一致性 |
 | `engine.test.mjs` | 15 | 流式样本替换、重试、四桶归并、零用量、模型切换、opencode 待官网 |
+| `compaction-usage.test.mjs` | 7 | 压缩摘要独立计费、同 turn/step 两次摘要各计一次、摘要路由取事件自带 provider/model、溢出 attempt 保留、流式样本仍被自身结算替换、零用量不出行 |
 | `activity.test.mjs` | 8 | `openStep` 权威性、`turnBoundary` 回退、子代理双通道识别、三桶稳定排序 |
 | `time-range.test.mjs` | 22 | 四档边界、缺失日期、聚合算术、浏览器运行时、DOM 事件、存储容错、HTML 集成 |
 | `daily.test.mjs` | 11 | 跨午夜拆分、未知时间桶、自然日边界、按天聚合去重、按天视图 DOM/存储 |
@@ -519,7 +520,7 @@ npm test
 | `zstd.test.mjs` | 2 | 多 frame 解压、非压缩 JSONL 兜底 |
 | `parent-session.test.mjs` | 10 | 父会话 id 归一、按数据源解析、筛选外父名、嵌套父代理、缺失/无标题兜底、两视图角色标记、HTML 转义、数据集字段 |
 | `provider-pricing.test.mjs` | 22 | AICodeMirror 30 模型 / 43 档位全量核对、四组倍率、提供方隔离、272K/200K 与缓存桶边界、重叠待确认、不重复记账、价格页/链接/静态配套页/转义 |
-| **合计（`npm test`）** | **151** | |
+| **合计（`npm test`）** | **158** | |
 
 `npm run test:ps` 另有 45 项 Windows 定向回归测试：无窗口启动（GUI 宿主 + CREATE_NO_WINDOW）、含空格/引号参数的
 引号化、单实例 mutex、离线退避序列、VBS 入口与错误文案，见 [docs/host-sync-windowless.md](docs/host-sync-windowless.md)。
@@ -575,6 +576,7 @@ Node 22 的测试进程隔离开关仍叫 `--experimental-test-isolation`，所�
 | [`LIVE.md`](LIVE.md) | 实时面板：三种模式、页面行为、API、全部参数、排障、安全 |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | 数据流、模块职责、关键不变量、扩展点 |
 | [`docs/DSH-TOKEN-ACCOUNTING.md`](docs/DSH-TOKEN-ACCOUNTING.md) | DSH 如何统计 token（事件、投影、替换/重试规则） |
+| [`docs/compaction-usage.md`](docs/compaction-usage.md) | 压缩（compaction）用量为何单独计费、折叠规则、与官方投影的差额、避免重复计数 |
 | [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) | 开发笔记：坑位、调试命令、验收清单、后续想法 |
 | [`docs/host-sync-windowless.md`](docs/host-sync-windowless.md) | 主机→VM 同步链无窗口化：根因、调用链、计划任务接法、回滚、回归测试与实测证据 |
 | [`docs/host-sync-watchdog.md`](docs/host-sync-watchdog.md) | 主机→VM 上传的超时上界、进程树收尾、心跳看护：故障时间线、接法与配置、回滚、回归测试 |

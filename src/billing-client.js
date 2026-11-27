@@ -46,7 +46,7 @@
         periods.forEach(function (period) { byStart[period.start] = period; });
         usable.forEach(function (entry) {
           var period = byStart[entry.date];
-          texts.push(period && period.days >= 1 ? { bad: false, text: tr('billing.period', { from: period.start, to: period.end, days: period.days }) } : { bad: true, text: tr('billing.needDate') });
+          texts.push(period && period.days >= 1 ? { bad: false, text: tr('billing.period', { from: period.start, to: period.end, days: period.days, expires: period.expiresOn }) } : { bad: true, text: tr('billing.needDate') });
         });
       }
     }

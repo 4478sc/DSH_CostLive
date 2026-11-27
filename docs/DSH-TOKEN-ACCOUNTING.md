@@ -47,6 +47,9 @@
 - **零用量**：全零样本不产生模型行，但仍参与替换作用域（能覆盖掉之前的流式样本）。
 - **模型归属**：按采样到达时最近一次 `request/header` / `model/selection` 的 provider/model 归属；
   一个会话可以中途换模型，甚至同一步骤换模型。
+- **压缩**：`compaction/summary` 带自己的 provider/model/usage，是**独立**计费样本，既不替换也不被替换；
+  `compaction/start` 关闭同 turn/step 的替换作用域，溢出那次 attempt 的用量因此保留。
+  官方 `tokenUsage` 投影不含压缩，详见 [compaction-usage.md](compaction-usage.md)。
 
 `engine.mjs` 的 `analyzeEvents()` 就是这套规则的实现；`test/engine.test.mjs` 覆盖了替换、重试、
 零用量与模型切换。
@@ -122,6 +125,8 @@ node bin/dsh-cost.mjs --verify
 输出「N 个会话可比对 · M 个不一致」，并列出不一致的会话 id。
 
 - 允许差异：投影是增量 fold，可能滞后于日志；运行中会话尤其明显。
+- 含压缩的会话：投影不含压缩、本工具包含，差额应当正好是 `compaction/summary` 的用量
+  （见 [compaction-usage.md](compaction-usage.md)），不属于不一致。
 - 不允许差异：同一采样金额不同 → 检查价表（`config/pricing.json`）是否与 DSH 侧口径一致，
   或峰谷判定的时区/时段被改过。
 - 历史基线：曾在 14 个真实会话（含 8 个 DeepSeek 会话）上做到 CLI 与投影逐样本一致。

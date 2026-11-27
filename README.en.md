@@ -421,8 +421,16 @@ printed row by row in the UI. The default table lives in [`config/pricing.json`]
 | Model | Input (uncached) | Output | Cache write | Cache read |
 |---|---:|---:|---:|---:|
 | `claude-sonnet-5-5` | 2.3 | 11.5 | 2.875 | 0.23 |
-| `deepseek-v4.1-flash` (off-peak) | 0.15 | 0.6 | 0.15 | 0.003 |
-| `deepseek-v4.1-flash` (peak) | 0.3 | 1.2 | 0.3 | 0.006 |
+| `deepseek-v4.1-flash` (off-peak) | 1 | 4 | 1 | 0.02 |
+| `deepseek-v4.1-flash` (peak) | 2 | 8 | 2 | 0.04 |
+
+The DeepSeek two-tier rows come from the official CNY price list
+(<https://api-docs.deepseek.com/zh-cn/quick_start/pricing/>, read 2026-11-27): off-peak cache hit 0.02 /
+cache miss 1 / output 4, with peak exactly double. They previously carried the USD figures from the English
+version of that same table (0.003 / 0.15 / 0.6), so a CNY bill was charged 3/20 of the real price — an
+undercount of about 6.7x. The official rule also skips Chinese public holidays inside weekday peak hours,
+but this table only honours the dates listed in `peakHours.holidays` (empty by default), so by default the
+tier follows weekday windows and weekends only.
 
 ```text
 cost = (uncached input × input + output × output + cache write × cacheWrite + cache read × cacheRead) / 1e6

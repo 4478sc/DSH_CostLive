@@ -355,7 +355,9 @@ test('without cache-write tokens the gemini row is exact, not an estimate', () =
 test('DeepSeek keeps its local table and its official route untouched', () => {
   const pricing = loadPricing();
   const deepseek = pricing.models['deepseek-v4.1-flash'];
-  assert.deepEqual([deepseek.input, deepseek.output, deepseek.cacheWrite, deepseek.cacheRead], [0.15, 0.6, 0.15, 0.003]);
+  // Official CNY valley tariff (peak doubles it); the USD numbers are not used here.
+  assert.deepEqual([deepseek.input, deepseek.output, deepseek.cacheWrite, deepseek.cacheRead], [1, 4, 1, 0.02]);
+  assert.deepEqual(deepseek.peak, { input: 2, output: 8, cacheWrite: 2, cacheRead: 0.04 });
   // A direct DeepSeek request is still billed by the local CNY table.
   const direct = analyzeOne('deepseek', 'deepseek-v4.1-flash', { inputTokens: 1000000, outputTokens: 1000000, cacheWriteTokens: 0, cacheReadTokens: 1000000 });
   assert.ok(direct.totals.costMicroCny > 0);

@@ -725,9 +725,9 @@ test('renderHtml embeds the selector, row timestamps, and the filter dataset', (
   assert.equal(dataset.sessions[0].id, 's-today');
   assert.equal(dataset.sessions[0].createdAt, NOW);
   assert.equal(dataset.sessions[1].createdAt, null);
-  // 9000 × (0.15 − 0.003) = 1323 micro-CNY, rounded per model.
-  assert.equal(dataset.sessions[0].cacheSavingMicro, 1323);
-  assert.equal(dataset.sessions[0].models[0].cacheSavingMicro, 1323);
+  // 9000 × (1 − 0.02) = 8820 micro-CNY, rounded per model.
+  assert.equal(dataset.sessions[0].cacheSavingMicro, 8820);
+  assert.equal(dataset.sessions[0].models[0].cacheSavingMicro, 8820);
   assert.equal(dataset.sessions[1].models[0].priced, false);
   assert.equal(dataset.sessions[1].cacheSavingMicro, 0);
   // No-JS: every session row is present in the document.
@@ -766,9 +766,9 @@ test('buildTimeRangeDataset rounds cache savings per model', () => {
     pageSize: 3,
   });
   assert.equal(built.pageSize, 3);
-  assert.equal(built.sessions[0].models[0].cacheSavingMicro, 15); // round(100 × 0.147)
+  assert.equal(built.sessions[0].models[0].cacheSavingMicro, 98); // round(100 × 0.98)
   assert.equal(built.sessions[0].models[1].cacheSavingMicro, 0);
-  assert.equal(built.sessions[0].cacheSavingMicro, 15);
+  assert.equal(built.sessions[0].cacheSavingMicro, 98);
   assert.equal(built.sessions[0].tokens.totalTokens, 112);
 });
 

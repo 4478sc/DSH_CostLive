@@ -9,15 +9,15 @@
       "cacheRead": 0.23
     },
     "deepseek-v4.1-flash": {
-      "input": 0.15,
-      "output": 0.6,
-      "cacheWrite": 0.15,
-      "cacheRead": 0.003,
+      "input": 1,
+      "output": 4,
+      "cacheWrite": 1,
+      "cacheRead": 0.02,
       "peak": {
-        "input": 0.3,
-        "output": 1.2,
-        "cacheWrite": 0.3,
-        "cacheRead": 0.006
+        "input": 2,
+        "output": 8,
+        "cacheWrite": 2,
+        "cacheRead": 0.04
       },
       "peakHours": {
         "timeZone": "Asia/Shanghai",

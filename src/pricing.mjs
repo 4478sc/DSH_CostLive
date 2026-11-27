@@ -41,15 +41,19 @@ export const DEFAULT_PRICING = Object.freeze({
       cacheWrite: 2.875,
       cacheRead: 0.23,
     }),
-    // DeepSeek V4.1 Flash (served as `deepseek-flash`). Default = 谷值: cache
-    // miss 0.15 / cache hit 0.003 / output 0.6 CNY per 1M; peak = doubled.
-    // A cache write is billed as a cache miss, so cacheWrite mirrors `input`.
+    // DeepSeek V4.1 Flash (served as `deepseek-flash`). Official CNY list price
+    // from https://api-docs.deepseek.com/zh-cn/quick_start/pricing/ (read
+    // 2026-11-27): off-peak (谷值) cache hit 0.02 / cache miss 1 / output 4 CNY
+    // per 1M, and peak is exactly double (0.04 / 2 / 8). The English page of the
+    // same table quotes USD (0.003 / 0.15 / 0.6); those numbers are not CNY and
+    // must not sit here. A cache write is billed as a cache miss, so cacheWrite
+    // mirrors `input`.
     'deepseek-v4.1-flash': Object.freeze({
-      input: 0.15,
-      output: 0.6,
-      cacheWrite: 0.15,
-      cacheRead: 0.003,
-      peak: Object.freeze({ input: 0.3, output: 1.2, cacheWrite: 0.3, cacheRead: 0.006 }),
+      input: 1,
+      output: 4,
+      cacheWrite: 1,
+      cacheRead: 0.02,
+      peak: Object.freeze({ input: 2, output: 8, cacheWrite: 2, cacheRead: 0.04 }),
       peakHours: DEFAULT_PEAK_HOURS,
     }),
   }),

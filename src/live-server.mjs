@@ -8,6 +8,8 @@
  *   /api/health       liveness/scan diagnostics
  *   /api/billing      local settings (PUT is loopback-only, same-origin JSON)
  *   /api/report.csv   current server report in CSV format
+ *   /pricing/<id>     one standalone price page per provider; a legacy id (such
+ *                     as /pricing/deepseek) redirects to the canonical page
  *
  * The server binds to loopback by default and refreshes on demand: each poll
  * re-reads the DSH session logs. A 1-second cache coalesces simultaneous
@@ -19,7 +21,7 @@ import { resolve } from 'node:path';
 import { formatMoney } from './money.mjs';
 import { formatCny, formatTokens, loadUsdPricing } from './pricing.mjs';
 import { loadProviderPricing } from './provider-pricing.mjs';
-import { providerPageHref, renderProviderPage } from './pricing-pages.mjs';
+import { canonicalPageId, providerPageHref, renderProviderPage } from './pricing-pages.mjs';
 import {
   DEFAULT_INTERVAL_MS,
   DEFAULT_PORT,
@@ -349,10 +351,20 @@ export async function startLiveServer(options = {}) {
           sendText(response, 400, 'Bad Request');
           return;
         }
+        // Old bookmarks used /pricing/deepseek, but the route a session records is
+        // /pricing/deepseek-account. Redirect so one service keeps one page, and
+        // carry the query string over so ?lang=en still selects English.
+        const pageId = canonicalPageId(providerId);
+        if (pageId !== providerId) {
+          const search = query.toString();
+          response.writeHead(302, { Location: providerPageHref(pageId) + (search === '' ? '' : '?' + search), 'Cache-Control': 'no-store' });
+          response.end();
+          return;
+        }
         const current = refresh(false);
         const docs = providerDocs();
         const page = renderProviderPage({
-          id: providerId,
+          id: pageId,
           report: current.report,
           card: docs.card,
           usdPricing: docs.usd,

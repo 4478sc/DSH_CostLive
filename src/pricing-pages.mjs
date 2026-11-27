@@ -11,11 +11,16 @@
  * to the report as pricing-<id>.html, the live server answers /pricing/<id>.
  * Because they are ordinary documents, a live fragment refresh of the dashboard
  * cannot break an already-open price page.
+ *
+ * DeepSeek has exactly one page, addressed by the provider id DSH actually
+ * records (`deepseek-account`). The older `deepseek` page described the same
+ * service, so it is kept only as a legacy id that redirects there: one provider
+ * keeps one link, and an old bookmark still lands on the live tariff.
  */
 import { writeFileSync } from 'node:fs';
 import { basename, dirname, resolve } from 'node:path';
 import { formatUsd } from './money.mjs';
-import { formatCny, formatTokens } from './pricing.mjs';
+import { DEFAULT_PEAK_HOURS, describePeakHours, formatCny, formatTokens } from './pricing.mjs';
 import { buildProviderUsage } from './report-data.mjs';
 import { summarizeProviderPricing } from './provider-pricing.mjs';
 import { normalizeLocale, t } from './i18n.mjs';
@@ -40,6 +45,27 @@ export function limitText(value) {
   return String(value);
 }
 
+/**
+ * Canonical page id of the DeepSeek route.
+ *
+ * DSH records the route as `deepseek-account`; an earlier dashboard invented a
+ * separate `deepseek` page for the same service and produced two links for one
+ * provider. `deepseek` stays a legacy id only and redirects here.
+ */
+export const DEEPSEEK_PAGE_ID = 'deepseek-account';
+
+/** Official CNY list price the DeepSeek page cites as its source. */
+export const DEEPSEEK_PRICING_SOURCE = 'https://api-docs.deepseek.com/zh-cn/quick_start/pricing/';
+
+/** Legacy page ids and the canonical page that now serves them. */
+const LEGACY_PAGE_IDS = Object.freeze({ deepseek: DEEPSEEK_PAGE_ID });
+
+/** Resolve a legacy page id to its canonical id (identity for everything else). */
+export function canonicalPageId(providerId) {
+  const value = String(providerId ?? '');
+  return LEGACY_PAGE_IDS[value] ?? value;
+}
+
 /** True when the local CNY table still prices DeepSeek (drives the page list). */
 function hasDeepseekModel(pricing) {
   return Object.keys(pricing?.models ?? {}).some((id) => id.startsWith('deepseek'));
@@ -50,9 +76,9 @@ export function providerPageFileName(providerId) {
   return 'pricing-' + String(providerId).replace(/[^A-Za-z0-9._-]/gu, '_') + '.html';
 }
 
-/** Same-origin route used by the live server. */
+/** Same-origin route used by the live server (legacy ids point at the canonical page). */
 export function providerPageHref(providerId) {
-  return '/pricing/' + encodeURIComponent(String(providerId));
+  return '/pricing/' + encodeURIComponent(canonicalPageId(providerId));
 }
 
 /**
@@ -86,16 +112,26 @@ export function providerPageEntries({ report, card = null, usdPricing = null, pr
   }
   entries.push({ id: 'opencode', kind: 'official', title: 'OpenCode', badge: 'opencode', desc: tr('price.desc.opencode'), counts: '' });
   if (hasDeepseekModel(pricing)) {
-    entries.push({ id: 'deepseek', kind: 'local', title: 'DeepSeek', badge: 'deepseek', desc: tr('price.desc.deepseek'), counts: '' });
+    entries.push({ id: DEEPSEEK_PAGE_ID, kind: 'local', title: 'DeepSeek', badge: DEEPSEEK_PAGE_ID, desc: tr('price.desc.deepseek'), counts: '' });
   }
-  for (const usage of report?.providerUsage ?? []) {
-    const id = usage.provider;
-    if (typeof id !== 'string' || id === '' || id === 'unknown' || entries.some((entry) => entry.id === id)) continue;
-    entries.push({ id, kind: 'other', title: id, badge: id, desc: tr('price.desc.other'), counts: '' });
+  // One usage row per page: a legacy route folding into a canonical page must
+  // not add a second link for the same provider.
+  const usages = (report?.providerUsage ?? []).filter(
+    (usage) => typeof usage.provider === 'string' && usage.provider !== '' && usage.provider !== 'unknown',
+  );
+  for (const usage of usages) {
+    const id = canonicalPageId(usage.provider);
+    if (entries.some((entry) => entry.id === id)) continue;
+    entries.push({ id, kind: 'other', title: id, badge: usage.provider, desc: tr('price.desc.other'), counts: '' });
   }
-  const usageById = new Map((report?.providerUsage ?? []).map((usage) => [usage.provider, usage]));
+  const usageByPage = new Map();
+  for (const usage of usages) {
+    const id = canonicalPageId(usage.provider);
+    const previous = usageByPage.get(id);
+    usageByPage.set(id, previous === undefined ? usage : mergeUsage(previous, usage));
+  }
   return entries.map((entry) => {
-    const usage = usageById.get(entry.id) ?? null;
+    const usage = usageByPage.get(entry.id) ?? null;
     return {
       ...entry,
       usage,
@@ -113,6 +149,40 @@ function usageText(usage) {
   if ((usage.costMicroCny ?? 0) > 0) parts.push(formatCny(usage.costMicroCny / 1e6));
   if ((usage.costMicroUsd ?? 0) > 0) parts.push(formatUsd(usage.costMicroUsd / 1e6));
   return parts.length === 0 ? formatCny(0) : parts.join(' + ');
+}
+
+/**
+ * Sum two usage aggregates that share one page id (a legacy and the current
+ * route of the same service). Display arithmetic only: billing never sees this.
+ */
+function mergeUsage(a, b) {
+  const models = new Map();
+  for (const row of [...(a.models ?? []), ...(b.models ?? [])]) {
+    const key = `${row.model ?? ''}\u0000${row.contextTier ?? ''}`;
+    const previous = models.get(key);
+    if (previous === undefined) {
+      models.set(key, { ...row, tokens: { ...(row.tokens ?? {}) } });
+      continue;
+    }
+    for (const field of ['uncachedInputTokens', 'outputTokens', 'cacheWriteTokens', 'cacheReadTokens']) {
+      previous.tokens[field] = (previous.tokens[field] ?? 0) + (row.tokens?.[field] ?? 0);
+    }
+    previous.costMicroCny += row.costMicroCny ?? 0;
+    previous.costMicroUsd += row.costMicroUsd ?? 0;
+    previous.samples += row.samples ?? 0;
+    previous.priced = previous.priced === true || row.priced === true;
+    previous.estimated = previous.estimated === true || row.estimated === true;
+  }
+  return {
+    ...a,
+    totalTokens: (a.totalTokens ?? 0) + (b.totalTokens ?? 0),
+    costMicroCny: (a.costMicroCny ?? 0) + (b.costMicroCny ?? 0),
+    costMicroUsd: (a.costMicroUsd ?? 0) + (b.costMicroUsd ?? 0),
+    samples: (a.samples ?? 0) + (b.samples ?? 0),
+    priced: a.priced === true || b.priced === true,
+    estimated: a.estimated === true || b.estimated === true,
+    models: [...models.values()],
+  };
 }
 
 /** The price section of the dashboard: one link per provider, no inline rates. */
@@ -291,6 +361,84 @@ function usageSection(usage, tr) {
   ].join('');
 }
 
+/** Name DeepSeek serves a priced model under: an alias that resolves to it. */
+function servedModelName(modelId, pricing) {
+  const aliases = Object.keys(pricing?.aliases ?? {}).filter((from) => pricing.aliases[from] === modelId);
+  return aliases.sort((a, b) => a.length - b.length || a.localeCompare(b))[0] ?? modelId;
+}
+
+/**
+ * DeepSeek's own CNY tariff.
+ *
+ * Every rate is read from the effective price document that also bills the
+ * sessions, so the page cannot drift from the bill and no number is typed here.
+ * A peak row exists only when the entry carries a `peak` record; the hours and
+ * holidays wording follows that record instead of promising an automatic
+ * holiday calendar.
+ */
+function deepseekSection({ pricing, route, tr, locale }) {
+  const heading =
+    '<section class="pp-card" data-tariff="deepseek-cny" data-route="' + escapeText(route) + '">' +
+    '<h2>' + escapeText(tr('price.page.localTitle')) + '<span class="pp-factor">' + escapeText(pricing?.currency ?? 'CNY') + '</span></h2>';
+  const models = Object.entries(pricing?.models ?? {}).filter(([model]) => model.startsWith('deepseek'));
+  const rows = [];
+  const hours = [];
+  for (const [modelId, price] of models) {
+    const served = servedModelName(modelId, pricing);
+    const tiers = [{ id: 'off', label: tr('price.deepseek.tier.off'), record: price }];
+    if (price.peak !== undefined) tiers.push({ id: 'peak', label: tr('price.deepseek.tier.peak'), record: price.peak });
+    for (const tier of tiers) {
+      rows.push(
+        '<tr data-tier="' + tier.id + '">' +
+          '<td class="mono">' + escapeText(served) +
+          (served === modelId ? '' : '<span class="muted"> · ' + escapeText(modelId) + '</span>') +
+          '</td>' +
+          '<td>' + escapeText(tier.label) + '</td>' +
+          '<td class="num">' + escapeText(rateText(tier.record.input)) + '</td>' +
+          '<td class="num">' + escapeText(rateText(tier.record.cacheRead)) + '</td>' +
+          '<td class="num">' + escapeText(rateText(tier.record.output)) + '</td>' +
+          '<td class="num">' + escapeText(rateText(tier.record.cacheWrite)) + '</td>' +
+          '</tr>',
+      );
+    }
+    if (price.peak !== undefined) {
+      const window = price.peakHours ?? DEFAULT_PEAK_HOURS;
+      hours.push(
+        '<p class="muted">' + escapeText(tr('price.deepseek.hours', { model: served, hours: describePeakHours(price, locale === 'en' ? true : null) ?? '' })) + '</p>' +
+          '<p class="muted">' +
+          escapeText(
+            window.holidays.length === 0
+              ? tr('price.deepseek.holidays.none')
+              : tr('price.deepseek.holidays.list', { count: window.holidays.length, list: window.holidays.join(', ') }),
+          ) +
+          '</p>',
+      );
+    }
+  }
+  return [
+    heading,
+    '<div class="pp-body"><p>' +
+      escapeText(tr('price.deepseek.intro', { route, currency: pricing?.currency ?? 'CNY', tokens: formatTokens(pricing?.unitTokens ?? 1000000) })) +
+      '</p></div>',
+    '<div class="table-wrap"><table>',
+    '<thead><tr><th>' + escapeText(tr('table.model')) + '</th><th>' + escapeText(tr('price.table.tier')) + '</th>' +
+      '<th class="num">' + escapeText(tr('price.deepseek.col.miss')) + '</th>' +
+      '<th class="num">' + escapeText(tr('price.deepseek.col.hit')) + '</th>' +
+      '<th class="num">' + escapeText(tr('price.deepseek.col.output')) + '</th>' +
+      '<th class="num">' + escapeText(tr('price.deepseek.col.cacheWrite')) + '</th></tr></thead>',
+    '<tbody>' + rows.join('') + '</tbody>',
+    '</table></div>',
+    '<div class="note">' + escapeText(tr('price.deepseek.cacheWriteNote')) + '</div>',
+    '<div class="note">' + escapeText(tr('price.deepseek.pickNote')) + '</div>',
+    '<div class="pp-body">' + hours.join('') +
+      '<p class="pp-meta">' + escapeText(tr('price.deepseek.source')) + ' <a href="' + escapeText(DEEPSEEK_PRICING_SOURCE) +
+      '" target="_blank" rel="noopener noreferrer">' + escapeText(DEEPSEEK_PRICING_SOURCE) + '</a></p>' +
+      '</div>',
+    '<div class="note">' + escapeText(tr('price.deepseek.note')) + '</div>',
+    '</section>',
+  ].join('');
+}
+
 /**
  * Render one standalone provider page.
  *
@@ -299,14 +447,15 @@ function usageSection(usage, tr) {
 export function renderProviderPage({ id, report = null, card = null, usdPricing = null, pricing = null, locale = 'zh', backHref = '/', generatedAt = null } = {}) {
   const loc = normalizeLocale(locale);
   const tr = (key, params) => t(loc, key, params);
+  const pageId = canonicalPageId(id);
   const entries = providerPageEntries({ report, card, usdPricing, pricing, locale: loc });
-  const entry = entries.find((item) => item.id === id);
+  const entry = entries.find((item) => item.id === pageId);
   if (entry === undefined) return null;
   const usage =
     entry.usage ??
     (report === null || report === undefined
       ? null
-      : buildProviderUsage(report.sessions ?? []).find((row) => row.provider === id) ?? null);
+      : buildProviderUsage(report.sessions ?? []).find((row) => canonicalPageId(row.provider) === pageId) ?? null);
   const generated = generatedAt ?? report?.generatedAt ?? Date.now();
   const timeText = new Date(generated).toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
   const sections = [];
@@ -369,14 +518,7 @@ export function renderProviderPage({ id, report = null, card = null, usdPricing 
         '</div></section>',
     );
   } else if (entry.kind === 'local') {
-    const deepseek = pricing === null ? null : Object.entries(pricing.models).find(([model]) => model.startsWith('deepseek'));
-    const peakModel = deepseek !== null && deepseek !== undefined && deepseek[1].peak !== undefined ? deepseek[0] : null;
-    sections.push(
-      '<section class="pp-card"><h2>' + escapeText(tr('price.page.localTitle')) + '</h2><div class="pp-body">' +
-        '<p>' + escapeText(tr('price.deepseek.hidden')) + '</p>' +
-        (peakModel === null ? '' : '<p class="muted">' + escapeText(tr('price.deepseek.hours', { model: peakModel })) + '</p>') +
-        '</div><div class="note">' + escapeText(tr('price.deepseek.note')) + '</div></section>',
-    );
+    sections.push(deepseekSection({ pricing, route: entry.id, tr, locale: loc }));
   } else {
     sections.push('<section class="pp-card"><h2>' + escapeText(tr('price.page.otherTitle')) + '</h2><div class="pp-body"><p>' + escapeText(tr('price.other.note')) + '</p></div></section>');
   }
@@ -410,6 +552,29 @@ export function renderProviderPage({ id, report = null, card = null, usdPricing 
 }
 
 /**
+ * Static stand-in for a page that moved: a file:// reader cannot follow an HTTP
+ * redirect, so the old companion file forwards with `meta refresh` and names the
+ * canonical file as its canonical link. Language-neutral on purpose.
+ */
+export function legacyPageStub(targetFileName) {
+  const href = escapeText(targetFileName);
+  return [
+    '<!doctype html>',
+    '<html>',
+    '<head>',
+    '<meta charset="utf-8">',
+    '<meta name="viewport" content="width=device-width, initial-scale=1">',
+    '<meta name="referrer" content="no-referrer">',
+    '<meta http-equiv="refresh" content="0; url=' + href + '">',
+    '<link rel="canonical" href="' + href + '">',
+    '<title>DeepSeek price page moved</title>',
+    '</head>',
+    '<body><p><a href="' + href + '">' + href + '</a></p></body>',
+    '</html>',
+  ].join('\n');
+}
+
+/**
  * Write every provider page next to a static report.
  * @returns {string[]} absolute paths written.
  */
@@ -418,11 +583,20 @@ export function writeProviderPages({ outPath, report, card = null, usdPricing = 
   const directory = dirname(target);
   const backHref = basename(target);
   const written = [];
-  for (const entry of providerPageEntries({ report, card, usdPricing, pricing, locale })) {
+  const entries = providerPageEntries({ report, card, usdPricing, pricing, locale });
+  for (const entry of entries) {
     const html = renderProviderPage({ id: entry.id, report, card, usdPricing, pricing, locale, backHref, generatedAt: report?.generatedAt });
     if (html === null) continue;
     const file = resolve(directory, providerPageFileName(entry.id));
     writeFileSync(file, html, 'utf8');
+    written.push(file);
+  }
+  // An old static file name must keep working too: it forwards to the canonical
+  // companion page instead of 404ing or showing a second copy of the tariff.
+  for (const [legacyId, canonicalId] of Object.entries(LEGACY_PAGE_IDS)) {
+    if (!entries.some((entry) => entry.id === canonicalId)) continue;
+    const file = resolve(directory, providerPageFileName(legacyId));
+    writeFileSync(file, legacyPageStub(providerPageFileName(canonicalId)), 'utf8');
     written.push(file);
   }
   return written;

@@ -173,11 +173,14 @@ dsh-cost live · 实时费用面板
 | `GET /api/report` | 与 `dsh-cost report --format json` 相同的完整 JSON（含 `sessions`、`pricing`） |
 | `GET /api/health` | 运行状态、扫描次数、耗时、错误信息、当前汇总 |
 | `GET /pricing/<provider>` | 该提供方的独立价格页（同站、纯服务端 HTML；只含价目与聚合用量，链接不带会话数据） |
+| `GET /pricing/deepseek-account` | DeepSeek 的人民币价目页：峰/谷两档直接取自当前生效价表，并给出官网来源与本地 `peakHours` 覆盖范围 |
+| `GET /pricing/deepseek` | 302 到 `/pricing/deepseek-account`（保留查询串，`?lang=en` 仍然有效）；旧书签兼容 |
 | `GET /pricing` | 302 回到 `/` |
 
 价格区在主面板里是「每个提供方一个链接」，点开在新标签打开上表的 `/pricing/<provider>`
 （`target="_blank" rel="noopener noreferrer"`）。实时片段每 20 秒整块替换正文，链接随之重建；
-`--once` / `--watch` 的静态快照没有 HTTP 服务，会在报告旁写出 `pricing-<id>.html` 并把链接改成相对路径。
+`--once` / `--watch` 的静态快照没有 HTTP 服务，会在报告旁写出 `pricing-<id>.html` 并把链接改成相对路径
+（旧的 `pricing-deepseek.html` 只写一个转发到 `pricing-deepseek-account.html` 的桩页）。
 
 ```powershell
 Invoke-RestMethod http://127.0.0.1:4173/api/health | Format-List

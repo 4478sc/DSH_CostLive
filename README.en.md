@@ -384,7 +384,7 @@ write `pricing-<id>.html` companion pages next to the report and switch the link
 | `aicodemirror1` | `/pricing/aicodemirror1` | four groups: USD quotes × a fixed factor → CNY |
 | `codex` (incl. `openai` / `host-codex`) | `/pricing/codex` | OpenAI USD list price, see the next section |
 | `opencode` (incl. `opencode-go`) | `/pricing/opencode` | console bill in USD, no fixed card |
-| `deepseek` | `/pricing/deepseek` | billed from the local CNY table; old rates are no longer shown |
+| `deepseek-account` (old `deepseek` links 302 here) | `/pricing/deepseek-account` | official CNY list price, peak/off-peak, read from the effective table |
 
 **AICodeMirror (`aicodemirror1`)** rates live in [`config/aicodemirror-pricing.json`](config/aicodemirror-pricing.json)
 as **USD per 1,000,000 tokens** and are booked in CNY: `CNY = USD × the group factor`, converted per bucket and
@@ -410,11 +410,11 @@ rounded to 6 decimals.
 - Gemini / Grok publish no cache-write column: the page shows `—`, billing falls back to that group's input rate,
   and the row is marked as an estimate whenever those tokens are actually used.
 - Only `aicodemirror1` is priced from this card; the same model id on another provider keeps its own table.
-- DeepSeek billing and the official sync are unchanged; only the dashboard and the price pages stop printing its
-  old unit prices.
+- DeepSeek billing and the official sync are unchanged; the dashboard still prints no unit price, and its
+  **current** CNY rates live only on `/pricing/deepseek-account`.
 
-The fallback table below still applies (DeepSeek, unlisted models, and providers without a card) but is no longer
-printed row by row in the UI. The default table lives in [`config/pricing.json`](config/pricing.json) in
+The fallback table below still applies (DeepSeek, unlisted models, and providers without a card); the dashboard
+does not inline those numbers, and only the DeepSeek page expands its two tiers from the effective configuration. The default table lives in [`config/pricing.json`](config/pricing.json) in
 **CNY per 1,000,000 tokens**. It only estimates CNY for **non**-opencode providers without a dedicated card;
 `opencode` / `opencode-go` are always billed in USD from the console, as described above:
 
@@ -431,6 +431,11 @@ version of that same table (0.003 / 0.15 / 0.6), so a CNY bill was charged 3/20 
 undercount of about 6.7x. The official rule also skips Chinese public holidays inside weekday peak hours,
 but this table only honours the dates listed in `peakHours.holidays` (empty by default), so by default the
 tier follows weekday windows and weekends only.
+
+`/pricing/deepseek-account` renders both tiers from that same configuration: per 1M tokens, off-peak cache
+miss 1 / cache hit 0.02 / output 4 and peak 2 / 0.04 / 8, with cache write marked as billed at the cache-miss
+rate. The page cites the official source and states the actual coverage of the local `peakHours` (empty
+`holidays` by default, so holidays are not detected automatically). The dashboard itself keeps one provider link.
 
 ```text
 cost = (uncached input × input + output × output + cache write × cacheWrite + cache read × cacheRead) / 1e6
@@ -549,7 +554,7 @@ DSH_CostLive/
 │  ├─ live.mjs                # live document / fragment / atomic write
 │  ├─ live-server.mjs         # local HTTP server: page, APIs and /pricing/<id>
 │  └─ live-client.js          # browser side: polling, folding, ranges, scroll restore
-├─ test/                      # node:test, 15 files, 158 cases + the Windows regression test
+├─ test/                      # node:test, 17 files, 175 cases + the Windows regression test
 ├─ tools/make-demo-home.mjs   # synthetic demo data generator
 ├─ tools/sync-vm-dsh.ps1      # incremental ~/.dsh → .dsh-vm sync from a VMware VM
 ├─ tools/vm-sync-snapshot.sh  # VM-side incremental packer
@@ -591,7 +596,9 @@ npm test
 | `zstd.test.mjs` | 2 | Multi-frame decompression, plain JSONL fallback |
 | `parent-session.test.mjs` | 10 | Parent id normalization, per-source resolution, parent outside the range, nested parents, missing/untitled fallbacks, role markers in both views, HTML escaping, dataset fields |
 | `provider-pricing.test.mjs` | 22 | Full AICodeMirror transcription (30 models / 43 tiers), four factors, provider isolation, 272K/200K and cache-bucket boundaries, ambiguous overlap, no double booking, price pages/links/static companions/escaping |
-| **Total (`npm test`)** | **158** | |
+| `deepseek-tariff.test.mjs` | 8 | Official CNY two-tier rates, alias resolution, peak boundaries and holidays, cache read/write billing, opencode official basis untouched |
+| `deepseek-page.test.mjs` | 9 | One DeepSeek page (`/pricing/deepseek-account`), legacy `deepseek` 302 keeping `lang`, page numbers from the same source as billing, official source and actual holiday coverage, static companion plus forwarding stub, zh/en rendering |
+| **Total (`npm test`)** | **175** | |
 
 `npm run test:ps` adds 45 Windows-targeted regression cases: windowless start (GUI host + CREATE_NO_WINDOW),
 argument quoting with spaces and quotes, the single-instance mutex, the offline retry ramp, the VBS entry point and

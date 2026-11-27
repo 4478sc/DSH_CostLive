@@ -431,9 +431,11 @@ test('the dashboard price section is one link per provider, with no inline table
     const html = renderHtml(report);
     assert.match(html, /id="price-links"/u);
     assert.equal((html.match(/<a class="provider-link"/gu) ?? []).length, 4);
-    for (const id of ['aicodemirror1', 'codex', 'opencode', 'deepseek']) {
+    for (const id of ['aicodemirror1', 'codex', 'opencode', 'deepseek-account']) {
       assert.match(html, new RegExp('data-provider="' + id + '" href="/pricing/' + id + '" target="_blank" rel="noopener noreferrer"', 'u'));
     }
+    // One link for DeepSeek: the legacy id must never add a second card.
+    assert.doesNotMatch(html, /data-provider="deepseek"/u);
     // DeepSeek's old unit rates are gone from the dashboard body.
     assert.doesNotMatch(html, /deepseek-v4\.1-flash<\/td>/u);
     assert.doesNotMatch(html, /0\.003/u);
@@ -495,10 +497,15 @@ test('the live server serves one same-origin price page per provider', async () 
     assert.doesNotMatch(page, /session-provider-0001/u);
     assert.doesNotMatch(page, /\/demo</u);
 
-    const deepseek = await (await fetch(live.url + 'pricing/deepseek')).text();
+    // DeepSeek: one canonical page with the effective CNY tariff, and the old
+    // route redirects to it instead of keeping a second page alive.
+    const deepseek = await (await fetch(live.url + 'pricing/deepseek-account')).text();
     assert.doesNotMatch(deepseek, /0\.003/u);
-    assert.doesNotMatch(deepseek, /deepseek-v4\.1-flash<\/td>/u);
+    assert.match(deepseek, /deepseek-flash/u);
     assert.match(deepseek, /本地计价|price.page.localTitle/u);
+    const legacy = await fetch(live.url + 'pricing/deepseek', { redirect: 'manual' });
+    assert.equal(legacy.status, 302);
+    assert.equal(legacy.headers.get('location'), '/pricing/deepseek-account');
 
     assert.equal((await fetch(live.url + 'pricing/nope')).status, 404);
     const redirect = await fetch(live.url + 'pricing', { redirect: 'manual' });
@@ -524,7 +531,20 @@ test('a static snapshot writes relative companion pages', () => {
     const outPath = join(outDir, 'dsh-cost-live.html');
     writeLiveSnapshot({ outPath, report, mode: 'file', intervalMs: 20000, autoReload: false });
     const names = readdirSync(outDir).sort();
-    assert.deepEqual(names, ['dsh-cost-live.html', 'pricing-aicodemirror1.html', 'pricing-codex.html', 'pricing-deepseek.html', 'pricing-opencode.html']);
+    assert.deepEqual(names, [
+      'dsh-cost-live.html',
+      'pricing-aicodemirror1.html',
+      'pricing-codex.html',
+      'pricing-deepseek-account.html',
+      'pricing-deepseek.html',
+      'pricing-opencode.html',
+    ]);
+    // The old file name is a forwarding stub, not a second copy of the tariff.
+    const legacyPage = readFileSync(join(outDir, 'pricing-deepseek.html'), 'utf8');
+    assert.match(legacyPage, /http-equiv="refresh" content="0; url=pricing-deepseek-account\.html"/u);
+    const canonicalPage = readFileSync(join(outDir, 'pricing-deepseek-account.html'), 'utf8');
+    assert.match(canonicalPage, />deepseek-flash</u);
+    assert.doesNotMatch(canonicalPage, /http-equiv="refresh"/u);
     const mainHtml = readFileSync(outPath, 'utf8');
     assert.match(mainHtml, /href="pricing-aicodemirror1\.html"/u);
     assert.doesNotMatch(mainHtml, /href="\/pricing\//u);
@@ -602,7 +622,7 @@ test('provider entries keep a stable order and include observed routes', () => {
     ],
   };
   const entries = providerPageEntries({ report, card, usdPricing: loadUsdPricing(), pricing: loadPricing(), locale: 'zh' });
-  assert.deepEqual(entries.map((entry) => entry.id), ['aicodemirror1', 'codex', 'opencode', 'deepseek', 'custom-route']);
+  assert.deepEqual(entries.map((entry) => entry.id), ['aicodemirror1', 'codex', 'opencode', 'deepseek-account', 'custom-route']);
   assert.equal(entries[0].counts, '4 组 · 30 个模型 · 43 档位');
   assert.equal(entries[0].usageText, '', 'no usage for AICodeMirror in this fixture');
   assert.match(entries[4].usageText, /本机用量/u);

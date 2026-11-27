@@ -171,6 +171,7 @@ test('writeLiveSnapshot writes atomically and leaves no temp file', () => {
       'dsh-cost-live.html',
       'pricing-aicodemirror1.html',
       'pricing-codex.html',
+      'pricing-deepseek-account.html',
       'pricing-deepseek.html',
       'pricing-opencode.html',
     ]);

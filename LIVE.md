@@ -173,11 +173,14 @@ dsh-cost live · 实时费用面板
 | `GET /api/report` | 与 `dsh-cost report --format json` 相同的完整 JSON（含 `sessions`、`pricing`） |
 | `GET /api/health` | 运行状态、扫描次数、耗时、错误信息、当前汇总 |
 | `GET /pricing/<provider>` | 该提供方的独立价格页（同站、纯服务端 HTML；只含价目与聚合用量，链接不带会话数据） |
+| `GET /pricing/deepseek-account` | DeepSeek 的人民币价目页：峰/谷两档直接取自当前生效价表，并给出官网来源与本地 `peakHours` 覆盖范围 |
+| `GET /pricing/deepseek` | 302 到 `/pricing/deepseek-account`（保留查询串，`?lang=en` 仍然有效）；旧书签兼容 |
 | `GET /pricing` | 302 回到 `/` |
 
 价格区在主面板里是「每个提供方一个链接」，点开在新标签打开上表的 `/pricing/<provider>`
 （`target="_blank" rel="noopener noreferrer"`）。实时片段每 20 秒整块替换正文，链接随之重建；
-`--once` / `--watch` 的静态快照没有 HTTP 服务，会在报告旁写出 `pricing-<id>.html` 并把链接改成相对路径。
+`--once` / `--watch` 的静态快照没有 HTTP 服务，会在报告旁写出 `pricing-<id>.html` 并把链接改成相对路径
+（旧的 `pricing-deepseek.html` 只写一个转发到 `pricing-deepseek-account.html` 的桩页）。
 
 ```powershell
 Invoke-RestMethod http://127.0.0.1:4173/api/health | Format-List
@@ -257,8 +260,8 @@ node .\bin\dsh-cost-live.mjs --once --auto-reload --out .\out\dsh-cost-live.html
 | 模型 | 输入（未缓存） | 输出 | 缓存创建 | 缓存读取 |
 |---|---:|---:|---:|---:|
 | `claude-sonnet-5-5` | 2.3 | 11.5 | 2.875 | 0.23 |
-| `deepseek-v4.1-flash`（谷值） | 0.15 | 0.6 | 0.15 | 0.003 |
-| `deepseek-v4.1-flash`（峰值） | 0.3 | 1.2 | 0.3 | 0.006 |
+| `deepseek-v4.1-flash`（谷值） | 1 | 4 | 1 | 0.02 |
+| `deepseek-v4.1-flash`（峰值） | 2 | 8 | 2 | 0.04 |
 
 ```json
 {
@@ -267,8 +270,8 @@ node .\bin\dsh-cost-live.mjs --once --auto-reload --out .\out\dsh-cost-live.html
   "models": {
     "claude-sonnet-5-5": { "input": 2.3, "output": 11.5, "cacheWrite": 2.875, "cacheRead": 0.23 },
     "deepseek-v4.1-flash": {
-      "input": 0.15, "output": 0.6, "cacheWrite": 0.15, "cacheRead": 0.003,
-      "peak": { "input": 0.3, "output": 1.2, "cacheWrite": 0.3, "cacheRead": 0.006 },
+      "input": 1, "output": 4, "cacheWrite": 1, "cacheRead": 0.02,
+      "peak": { "input": 2, "output": 8, "cacheWrite": 2, "cacheRead": 0.04 },
       "peakHours": {
         "timeZone": "Asia/Shanghai",
         "weekdays": [1, 2, 3, 4, 5],
@@ -284,9 +287,14 @@ node .\bin\dsh-cost-live.mjs --once --auto-reload --out .\out\dsh-cost-live.html
 }
 ```
 
+DeepSeek 两档价取自官方人民币价目（<https://api-docs.deepseek.com/zh-cn/quick_start/pricing/>，2026-11-27 读取）：
+谷值 缓存命中 0.02 / 缓存未命中 1 / 输出 4，峰值恰为其两倍；此前误填的 0.003 / 0.15 / 0.6 是同一价目
+英文页的美元数值，人民币口径下只按实际价的 3/20 计费。
+
 - 用 `--pricing <file>` 指定别的价格表；页面底部会自动显示当前价格表，两档价模型另有峰值价与时段说明。
 - 峰值/谷值按**每条采样自己的时间戳**判定：窗口外、周末、`holidays` 中的日期、以及没有时间戳的采样
-  都按谷值价（默认价）。
+  都按谷值价（默认价）。`holidays` 默认是空数组，所以默认只按工作日时段与周末判档；官方
+  「工作日峰时不含中国法定节假日」的口径要生效，需自行把日期填进 `holidays`。
 - `deepseek-v4.1-flash` 等模型**没有缓存写**：价表虽然保留了 `cacheWrite` 单价，但实际
   `cacheWriteTokens` 为 0，该项乘 0，不会与未缓存输入重复计费；只有模型确实上报缓存写时才产生金额。
 - 没有匹配价格的模型**仍然统计 token**，费用显示为 `—` / 0，

@@ -107,8 +107,9 @@ test('prices the shipped DeepSeek V4.1 Flash entry and its official aliases', ()
     assert.equal(resolvePrice(id, pricing)?.key, 'deepseek-v4.1-flash', id);
   }
   const price = pricing.models['deepseek-v4.1-flash'];
-  assert.deepEqual([price.input, price.output, price.cacheWrite, price.cacheRead], [0.15, 0.6, 0.15, 0.003]);
-  assert.deepEqual(price.peak, { input: 0.3, output: 1.2, cacheWrite: 0.3, cacheRead: 0.006 });
+  // Official CNY list price; see test/deepseek-tariff.test.mjs for the source.
+  assert.deepEqual([price.input, price.output, price.cacheWrite, price.cacheRead], [1, 4, 1, 0.02]);
+  assert.deepEqual(price.peak, { input: 2, output: 8, cacheWrite: 2, cacheRead: 0.04 });
   assert.equal(describePeakHours(price), 'Asia/Shanghai 周一至周五 09:00-12:00、14:00-18:00');
 });
 

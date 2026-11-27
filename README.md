@@ -332,7 +332,7 @@ HTML 报告与实时页都提供「按会话 / 按天」切换（存于 `localSt
 | `aicodemirror1` | `/pricing/aicodemirror1` | 四组 USD 报价 × 固定倍率 → 人民币 |
 | `codex`（含 `openai` / `host-codex`） | `/pricing/codex` | OpenAI USD 列表价，见下一节 |
 | `opencode`（含 `opencode-go`） | `/pricing/opencode` | 控制台账单 USD，无固定价目 |
-| `deepseek` | `/pricing/deepseek` | 本地 CNY 表计价；旧价目已不在面板与价格页展示 |
+| `deepseek-account`（旧 `deepseek` 链接 302 过来） | `/pricing/deepseek-account` | 官方人民币价目，峰/谷两档，页内直接取自当前生效价表 |
 
 **AICodeMirror（`aicodemirror1`）** 的价目在 [`config/aicodemirror-pricing.json`](config/aicodemirror-pricing.json)，
 报价为 **USD / 1,000,000 tokens**，记账人民币：`CNY = USD × 组倍率`，逐 bucket 折算并四舍五入到 6 位小数。
@@ -353,9 +353,9 @@ HTML 报告与实时页都提供「按会话 / 按天」切换（存于 `localSt
 - 通用保护仍在：任何真正重叠的档位都不会被猜价，仍按未定价/待确认处理（费用 0 + 告警）并在价格页并列两档。
 - Gemini / Grok 没有缓存创建列：页面显示 `—`，计费用该组输入价兜底，并在真正用到该桶时把行标为「估算」。
 - 只有 `aicodemirror1` 走这张卡；同一模型 id 在别的提供方仍按各自价表计价，不会被连带改价。
-- DeepSeek 的本地计价与官方同步都没变，只是主面板与价格页不再打印它的旧单价。
+- DeepSeek 的本地计价与官方同步都没变；主面板仍不打印单价，它的**当前**人民币单价只在 `/pricing/deepseek-account` 展示。
 
-下面的回退表仍然生效（DeepSeek、未列型号，以及没有专属价卡的提供方），但不再在界面上逐项展示。
+下面的回退表仍然生效（DeepSeek、未列型号，以及没有专属价卡的提供方）；主面板不内联这些数字，只有 DeepSeek 的两档价会在它自己的价格页按当前生效配置展开。
 默认价表在 [`config/pricing.json`](config/pricing.json)，单位 **CNY / 1,000,000 tokens**。
 该表只给**非** opencode 且没有专属价卡的提供方估算 CNY；
 `opencode` / `opencode-go` 一律按控制台账单计 USD，见上一节：
@@ -363,8 +363,18 @@ HTML 报告与实时页都提供「按会话 / 按天」切换（存于 `localSt
 | 模型 | 输入（未缓存） | 输出 | 缓存写 | 缓存读 |
 |---|---:|---:|---:|---:|
 | `claude-sonnet-5-5` | 2.3 | 11.5 | 2.875 | 0.23 |
-| `deepseek-v4.1-flash`（谷值） | 0.15 | 0.6 | 0.15 | 0.003 |
-| `deepseek-v4.1-flash`（峰值） | 0.3 | 1.2 | 0.3 | 0.006 |
+| `deepseek-v4.1-flash`（谷值） | 1 | 4 | 1 | 0.02 |
+| `deepseek-v4.1-flash`（峰值） | 2 | 8 | 2 | 0.04 |
+
+DeepSeek 两档价取自官方人民币价目（<https://api-docs.deepseek.com/zh-cn/quick_start/pricing/>，2026-11-27 读取）：
+谷值 缓存命中 0.02 / 缓存未命中 1 / 输出 4，峰值恰为其两倍。此前这张人民币表误填了同一价目
+英文页的美元数值（0.003 / 0.15 / 0.6），只按实际价的 3/20 计费，低估约 6.7 倍。官方口径里工作日
+峰时不含中国法定节假日，本地表只认 `peakHours.holidays` 里列出的日期（默认空数组），
+所以默认只按工作日时段与周末判档。
+
+`/pricing/deepseek-account` 用同一份配置渲染这两档：每百万 token 谷值 缓存未命中 1 / 缓存命中 0.02 / 输出 4，
+峰值 2 / 0.04 / 8，缓存写入按未命中输入价计并明确标注；页面同时给出官网来源，并说明本地 `peakHours`
+的实际覆盖范围（默认 `holidays` 为空，不会自动识别节假日）。主面板仍只给提供方链接。
 
 ```text
 cost = (未缓存输入 × input + 输出 × output + 缓存写 × cacheWrite + 缓存读 × cacheRead) / 1e6
@@ -478,7 +488,7 @@ DSH_CostLive/
 │  ├─ live.mjs                # 实时页文档 / 片段 / 原子写入
 │  ├─ live-server.mjs         # 本地 HTTP 服务：页面、API 与 /pricing/<id>
 │  └─ live-client.js          # 浏览器端：轮询、折叠、范围、滚动恢复
-├─ test/                      # node:test 15 个文件 158 项 + Windows 回归测试
+├─ test/                      # node:test 17 个文件 175 项 + Windows 回归测试
 ├─ tools/make-demo-home.mjs   # 合成演示数据生成器
 ├─ tools/sync-vm-dsh.ps1      # 从 VMware VM 增量同步 ~/.dsh 到 .dsh-vm
 ├─ tools/vm-sync-snapshot.sh  # VM 端增量打包脚本
@@ -520,7 +530,9 @@ npm test
 | `zstd.test.mjs` | 2 | 多 frame 解压、非压缩 JSONL 兜底 |
 | `parent-session.test.mjs` | 10 | 父会话 id 归一、按数据源解析、筛选外父名、嵌套父代理、缺失/无标题兜底、两视图角色标记、HTML 转义、数据集字段 |
 | `provider-pricing.test.mjs` | 22 | AICodeMirror 30 模型 / 43 档位全量核对、四组倍率、提供方隔离、272K/200K 与缓存桶边界、重叠待确认、不重复记账、价格页/链接/静态配套页/转义 |
-| **合计（`npm test`）** | **158** | |
+| `deepseek-tariff.test.mjs` | 8 | 官方 CNY 两档价、别名归一、峰谷边界与节假日、缓存读写计费、opencode 官方口径不被覆盖 |
+| `deepseek-page.test.mjs` | 9 | 唯一 DeepSeek 价格页（`/pricing/deepseek-account`）、旧 `deepseek` 302 保留 `lang`、页内数字与计费同源、官方来源与 holidays 实际覆盖、静态配套页与转发桩、中英渲染 |
+| **合计（`npm test`）** | **175** | |
 
 `npm run test:ps` 另有 45 项 Windows 定向回归测试：无窗口启动（GUI 宿主 + CREATE_NO_WINDOW）、含空格/引号参数的
 引号化、单实例 mutex、离线退避序列、VBS 入口与错误文案，见 [docs/host-sync-windowless.md](docs/host-sync-windowless.md)。
